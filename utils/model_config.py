@@ -69,7 +69,7 @@ def get_models(args, nets, model, models=None):
                 lora_model.print_trainable_parameters()
                 return lora_model
             
-            elif args.model == 'LlamaCasual':
+            elif args.model == 'LlamaCausal':
                 cfg = AutoConfig.from_pretrained('meta-llama/Llama-2-7b-hf')
                 backbone = AutoModelForCausalLM.from_pretrained(
                     'meta-llama/Llama-2-7b-hf',

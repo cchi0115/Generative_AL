@@ -132,7 +132,7 @@ def get_dataset(args, trial):
                 train_set = MyAGNewsDataset(agnews_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
                 test_set = MyAGNewsDataset(agnews_dataset['test'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
                 unlabeled_set = MyAGNewsDataset(agnews_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
-            elif args.model == 'LlamaCasual':
+            elif args.model == 'LlamaCausal':
                 train_set = AGNewsCausalLMOptionDataset(agnews_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
                 test_set = AGNewsCausalLMOptionDataset(agnews_dataset['test'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
                 unlabeled_set = AGNewsCausalLMOptionDataset(agnews_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
