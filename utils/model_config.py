@@ -77,6 +77,10 @@ def get_models(args, nets, model, models=None):
                     device_map="auto"
                 )
 
+                tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-hf')
+                if tokenizer.pad_token is None:
+                    tokenizer.pad_token = tokenizer.eos_token
+
                 lora_cfg = LoraConfig(
                     r=16,
                     lora_alpha=32,
@@ -88,7 +92,7 @@ def get_models(args, nets, model, models=None):
                 model = get_peft_model(backbone, lora_cfg)
                 model.print_trainable_parameters()
 
-                return model
+                return model, tokenizer
 
         # If the method requires OOD detection (and model_bc for EOAL)
         if args.method in ['LFOSA', 'EOAL', 'PAL']:
@@ -102,8 +106,13 @@ def get_models(args, nets, model, models=None):
                     num_classes=2 * int(args.num_IN_class), norm=False, input_size=512)
                 models['model_bc'] = prepare_model(model_bc)
         else:
-            backbone = prepare_model(load_text_model(args.num_IN_class))
-            models = {'backbone': backbone}
+            if args.causal_lm:
+                backbone, tokenizer = load_text_model(args.num_IN_class)
+                backbone = prepare_model(backbone)
+                models = {'backbone': backbone, 'tokenizer': tokenizer}
+            else:
+                backbone = prepare_model(load_text_model(args.num_IN_class))
+                models = {'backbone': backbone}
         return models
 
     # --------------------- Image Dataset Branch ---------------------

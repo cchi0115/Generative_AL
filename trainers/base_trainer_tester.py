@@ -213,7 +213,7 @@ def train_epoch_nlp_casuallm(args, models, criterion, optimizers, dataloaders, w
     total_correct = 0
     total_samples = 0
 
-    option_texts = ["A", "(B)", "(C)", "(D)"]
+    option_texts = ["A", "B", "C", "D"]
     tok = tokenizer(option_texts, add_special_tokens=False, return_tensors="pt", padding=True)
     option_tokens = [int(t[0]) for t in tok["input_ids"]]
 
