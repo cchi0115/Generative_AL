@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from transformers import RobertaForSequenceClassification
 from transformers import DistilBertForSequenceClassification
-from transformers import AutoConfig, AutoModelForSequenceClassification
+from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer, AutoModelForCausalLM
 from utils.schedulers import GradualWarmupScheduler
 from torchlars import LARS
 from utils.general_utils import create_optimizer, create_scheduler
@@ -40,7 +40,7 @@ def get_models(args, nets, model, models=None):
         return m
 
     # --------------------- Text Dataset Branch ---------------------
-    if args.model in ['DistilBert', 'Roberta', 'Llama']:
+    if args.model in ['DistilBert', 'Roberta', 'Llama', 'LlamaCasual']:
         def load_text_model(num_labels):
             # Load the corresponding text model with the specified number of labels.
             if args.model == 'DistilBert':
@@ -68,6 +68,27 @@ def get_models(args, nets, model, models=None):
                 lora_model = get_peft_model(model, lora_cfg)
                 lora_model.print_trainable_parameters()
                 return lora_model
+            
+            elif args.model == 'LlamaCasual':
+                cfg = AutoConfig.from_pretrained('meta-llama/Llama-2-7b-hf')
+                backbone = AutoModelForCausalLM.from_pretrained(
+                    'meta-llama/Llama-2-7b-hf',
+                    config=cfg,
+                    device_map="auto"
+                )
+
+                lora_cfg = LoraConfig(
+                    r=16,
+                    lora_alpha=32,
+                    lora_dropout=0.05,
+                    bias="none",
+                    task_type="CAUSAL_LM",
+                    target_modules=["q_proj", "v_proj"],
+                )
+                model = get_peft_model(backbone, lora_cfg)
+                model.print_trainable_parameters()
+
+                return model
 
         # If the method requires OOD detection (and model_bc for EOAL)
         if args.method in ['LFOSA', 'EOAL', 'PAL']:

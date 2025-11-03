@@ -87,3 +87,75 @@ class MyAGNewsDataset(Dataset):
         int: Number of samples.
         """
         return len(self.data)
+
+
+class AGNewsCausalLMOptionDataset(Dataset):
+    def __init__(self, hf_dataset, tokenizer, max_length=256):
+        self.data = hf_dataset
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+
+        self.option_texts = [
+            "A",  # 0: World
+            "B",  # 1: Sports
+            "C",  # 2: Business
+            "D",  # 3: Sci/Tech
+        ]
+        self.label_texts = [
+            "World",
+            "Sports",
+            "Business",
+            "Sci/Tech",
+        ]
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        text = self.data[idx]["text"]
+        label_id = self.data[idx]["label"]  # 0~3
+
+        prompt = (
+            "Classify the following news into one of the options, please answeer with a single charactor 'A', 'B', 'C' or 'D':\n"
+            "A. World\n"
+            "B. Sports\n"
+            "C. Business\n"
+            "D. Sci/Tech\n\n"
+            f"News: {text}\n"
+            "Answer: "
+        )
+
+        answer = self.option_texts[label_id]
+
+        full_text = prompt + answer
+
+        enc = self.tokenizer(
+            full_text,
+            max_length=self.max_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt",
+        )
+
+        input_ids = enc["input_ids"].squeeze(0)
+        attention_mask = enc["attention_mask"].squeeze(0)
+
+        labels = input_ids.clone()
+
+        prompt_enc = self.tokenizer(
+            prompt,
+            max_length=self.max_length,
+            truncation=True,
+            return_tensors="pt",
+        )
+        prompt_len = prompt_enc["input_ids"].size(1)
+
+        labels[:prompt_len] = -100
+
+        return {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "labels": labels,
+            "option_id": torch.tensor(label_id, dtype=torch.long),
+            "index": idx,
+        }

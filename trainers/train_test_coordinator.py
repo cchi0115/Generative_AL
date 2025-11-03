@@ -6,7 +6,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from trainers.base_trainer_tester import train, train_epoch, train_epoch_nlp, test, test_nlp, test_ood, test_ood_nlp
+from trainers.base_trainer_tester import train, train_epoch, train_epoch_nlp, test, test_nlp, test_nlp_casuallm, test_ood, test_ood_nlp
 from trainers.lfosa_trainer import train_epoch_lfosa, train_epoch_lfosa_nlp
 from trainers.ll_trainer import train_epoch_ll
 from trainers.tidal_trainer import train_epoch_tidal
@@ -134,6 +134,8 @@ def evaluate_model(args, models, dataloaders):
         Test accuracy
     """
     if args.textset:  # text dataset
+        if args.causal_lm:
+            return test_nlp_casuallm(args, models, dataloaders)
         if 'ood_detection' in models and args.method in ['LFOSA']:
             test_ood_nlp(args, models, dataloaders)
             return test_nlp(args, models, dataloaders)

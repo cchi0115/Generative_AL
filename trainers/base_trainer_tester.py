@@ -7,6 +7,7 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 from sklearn.metrics import f1_score, recall_score, precision_score, accuracy_score
 from sklearn.metrics import hamming_loss, jaccard_score
+import torch.nn.functional as F
 
 def train(args, trial, models, criterion, optimizers, schedulers, dataloaders, writer=None):
     """
@@ -30,7 +31,11 @@ def train(args, trial, models, criterion, optimizers, schedulers, dataloaders, w
 
     for epoch in tqdm(range(args.epochs), leave=False, total=args.epochs):
         if args.textset:  # text dataset
-            epoch_loss, epoch_accuracy = train_epoch_nlp(args, models, criterion, optimizers, dataloaders, writer, epoch)
+            if not args.causal_lm:
+                epoch_loss, epoch_accuracy = train_epoch_nlp(args, models, criterion, optimizers, dataloaders, writer, epoch)
+            else:
+                epoch_loss, epoch_accuracy = train_epoch_nlp_casuallm(args, models, criterion, optimizers, dataloaders, writer, epoch)
+
         else:
             epoch_loss, epoch_accuracy = train_epoch(args, models, criterion, optimizers, dataloaders, writer, epoch)
         
@@ -195,6 +200,57 @@ def train_epoch_nlp(args, models, criterion, optimizers, dataloaders, writer, ep
     epoch_accuracy = correct_predictions / total_predictions
 
     return epoch_loss, epoch_accuracy
+
+def train_epoch_nlp_casuallm(args, models, criterion, optimizers, dataloaders, writer, epoch):
+    model = models["backbone"]
+    tokenizer = models.get("tokenizer", None)
+    model.train()
+
+    device = args.device
+    train_loader = dataloaders["train_in"]
+
+    total_loss = 0.0
+    total_correct = 0
+    total_samples = 0
+
+    option_texts = ["(A)", "(B)", "(C)", "(D)"]
+    tok = tokenizer(option_texts, add_special_tokens=False, return_tensors="pt", padding=True)
+    option_tokens = [int(t[0]) for t in tok["input_ids"]]
+
+    option_tokens = torch.tensor(option_tokens, device=device)  # [4]
+
+    for i, batch in enumerate(train_loader):
+        input_ids = batch["input_ids"].to(device)           # [B, T]
+        attention_mask = batch["attention_mask"].to(device)
+        labels = batch["labels"].to(device)                 # [B, T], prompt = -100
+        option_id = batch["option_id"].to(device)           # [B], 0~3
+
+        optimizers["backbone"].zero_grad()
+
+        out = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=labels,
+        )
+        loss = out.loss
+        loss.backward()
+        optimizers["backbone"].step()
+
+        total_loss += loss.item() * input_ids.size(0)
+        total_samples += input_ids.size(0)
+
+        with torch.no_grad():
+            # out.logits: [B, T, vocab]
+            last_logits = out.logits[:, -1, :]               # [B, vocab]
+            abcd_logits = last_logits.index_select(1, option_tokens)  # [B, 4]
+            pred = abcd_logits.argmax(dim=1)                 # [B]
+            total_correct += (pred == option_id).sum().item()
+
+    avg_loss = total_loss / max(total_samples, 1)
+    avg_acc = total_correct / max(total_samples, 1)
+
+    print(f"[Train causal LM] Epoch {epoch}: loss={avg_loss:.4f}, acc={avg_acc:.4f}")
+    return avg_loss, avg_acc
 
 
 def test(args, models, dataloaders):
@@ -364,6 +420,104 @@ def test_nlp(args, models, dataloaders):
         
         return accuracy, precision, recall, f1
 
+def test_nlp_casuallm(args, models, dataloaders):
+    """
+    Test for causal LM (e.g., Llama) using single-character options A/B/C/D.
+    We read the last-token logits, extract A/B/C/D columns, and compute metrics.
+    
+    Returns:
+        (accuracy, precision, recall, f1) with single-label 'weighted' averages.
+    """
+    device = args.device
+    model = models["backbone"].to(device)
+    tokenizer = models.get("tokenizer", None)
+    assert tokenizer is not None, "tokenizer is required for causal LM testing."
+
+    model.eval()
+
+    cand_sets = [
+        ["A", "B", "C", "D"],
+        ["▁A", "▁B", "▁C", "▁D"],
+    ]
+    opt_ids = None
+    for cand in cand_sets:
+        ids = tokenizer.convert_tokens_to_ids(cand)
+        if all(i is not None and i != tokenizer.unk_token_id for i in ids):
+            opt_ids = torch.tensor(ids, device=device)
+            break
+    if opt_ids is None:
+        cand_enc = tokenizer(["A", "B", "C", "D"], add_special_tokens=False, return_tensors="pt", padding=True)
+        ids = [int(row[0].item()) for row in cand_enc["input_ids"]]
+        opt_ids = torch.tensor(ids, device=device)
+
+    all_preds, all_labels = [], []
+
+    with torch.no_grad():
+        for batch in dataloaders["test"]:
+            input_ids = batch["input_ids"].to(device)            # [B, T]
+            attention_mask = batch["attention_mask"].to(device)  # [B, T]
+
+            # 2) 前向，取最後一個 token 的 logits
+            out = model(input_ids=input_ids, attention_mask=attention_mask)
+            # logits: [B, T, vocab] → 取最後位置
+            last_logits = out.logits[:, -1, :]                    # [B, vocab]
+
+            # 3) 只抽 A/B/C/D 的 logits，softmax 得到分布
+            abcd_logits = last_logits.index_select(dim=1, index=opt_ids)  # [B, 4]
+            probs = F.softmax(abcd_logits, dim=1)                         # [B, 4]
+            preds = probs.argmax(dim=1)                                    # [B] in {0,1,2,3}
+
+            # 4) 取得真實標籤：
+            #    主要來源：dataset 提供的 'option_id'（建議在 causal LM dataset 中回傳）
+            if "option_id" in batch:
+                labels = batch["option_id"].to(device)                     # [B]
+            else:
+                # 後備方案：從 labels（-100 mask）中找最後一個非 -100 的 token，對應到 A/B/C/D
+                # 若對不上就跳過該筆
+                labels = []
+                if "labels" in batch:
+                    lab = batch["labels"].to(device)                       # [B, T]
+                    for i in range(lab.size(0)):
+                        row = lab[i]
+                        idxs = (row != -100).nonzero(as_tuple=False).squeeze(-1)
+                        if idxs.numel() == 0:
+                            labels.append(-1)
+                            continue
+                        last_idx = idxs[-1].item()
+                        tok_id = int(row[last_idx].item())
+                        # map tok_id → {0,1,2,3}
+                        if tok_id in opt_ids.tolist():
+                            labels.append(opt_ids.tolist().index(tok_id))
+                        else:
+                            labels.append(-1)
+                    labels = torch.tensor(labels, device=device)
+                else:
+                    labels = torch.full((preds.size(0),), -1, device=device, dtype=torch.long)
+
+            valid_mask = labels != -1
+            if valid_mask.any():
+                all_preds.extend(preds[valid_mask].detach().cpu().numpy().tolist())
+                all_labels.extend(labels[valid_mask].detach().cpu().numpy().tolist())
+
+    all_preds = np.array(all_preds)
+    all_labels = np.array(all_labels)
+
+    if all_labels.size == 0:
+        print("Warning: no valid labels found in test_nlp_casuallm; returning zeros.")
+        return 0.0, 0.0, 0.0, 0.0
+
+    accuracy = accuracy_score(all_labels, all_preds)
+    precision = precision_score(all_labels, all_preds, average="weighted", zero_division=0)
+    recall = recall_score(all_labels, all_preds, average="weighted", zero_division=0)
+    f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
+
+    print("Causal-LM NLP Test Results (A/B/C/D):")
+    print(f"* Accuracy:  {accuracy:.3f}")
+    print(f"* Precision: {precision:.3f}")
+    print(f"* Recall:    {recall:.3f}")
+    print(f"* F1 Score:  {f1:.3f}")
+
+    return accuracy, precision, recall, f1
 
 def test_ood(args, models, dataloaders):
     """

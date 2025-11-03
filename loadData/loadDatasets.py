@@ -11,7 +11,7 @@ from ownDatasets.cifar10 import MyCIFAR10
 from ownDatasets.cifar100 import MyCIFAR100
 from ownDatasets.mnist import MyMNIST
 from ownDatasets.svhn import MySVHN
-from ownDatasets.agnews import MyAGNewsDataset
+from ownDatasets.agnews import MyAGNewsDataset, AGNewsCausalLMOptionDataset
 from ownDatasets.imdb import MyIMDBDataset
 from ownDatasets.sst5 import MySST5Dataset
 from ownDatasets.dbpedia import MyDbpediaDataset
@@ -101,7 +101,7 @@ def get_dataset(args, trial):
             tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
         elif args.model == 'Roberta':
             tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
-        elif args.model == 'Llama':
+        elif args.model == 'Llama' or args.model == 'LlamaCasual':
             tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-hf')
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token
@@ -128,9 +128,14 @@ def get_dataset(args, trial):
             unlabeled_set = MyDbpediaDataset(dbpedia_dataset['train'],tokenizer=tokenizer, imbalance_factor=args.imb_factor)
         elif args.dataset == 'AGNEWS':
             agnews_dataset = load_dataset('ag_news')
-            train_set = MyAGNewsDataset(agnews_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
-            test_set = MyAGNewsDataset(agnews_dataset['test'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
-            unlabeled_set = MyAGNewsDataset(agnews_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
+            if args.model == 'Llama':
+                train_set = MyAGNewsDataset(agnews_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
+                test_set = MyAGNewsDataset(agnews_dataset['test'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
+                unlabeled_set = MyAGNewsDataset(agnews_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
+            elif args.model == 'LlamaCasual':
+                train_set = AGNewsCausalLMOptionDataset(agnews_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
+                test_set = AGNewsCausalLMOptionDataset(agnews_dataset['test'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
+                unlabeled_set = AGNewsCausalLMOptionDataset(agnews_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
         elif args.dataset == 'TREC6':
             trec6_dataset = load_dataset("trec", trust_remote_code=True)
             train_set = MyTREC6Dataset(trec6_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)

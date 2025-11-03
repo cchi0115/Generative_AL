@@ -67,6 +67,8 @@ parser.add_argument('--seed', default=0, type=int, help="random seed")
 parser.add_argument('-j', '--workers', default=5, type=int, help='number of data loading workers (default: 4)')
 parser.add_argument("--no-ssl-save", action="store_false", dest="ssl_save", help="disable saving ssl model (saves by default)")
 parser.add_argument('--is_multilabel', action='store_true', help='multi-label classification task')
+parser.add_argument("--causal_lm", action="store_true",
+                    help="use causal LM (LLama) with ABCD option probing")
 # Balanced Subset Selection Parameters 
 parser.add_argument('--samples-per-class', type=int, default=None,
                    help='Number of samples to select per class for balanced subset. '
