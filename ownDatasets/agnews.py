@@ -149,49 +149,43 @@ class AGNewsCausalLMOptionDataset(Dataset):
 
     def __getitem__(self, idx):
         text = self.data_texts[idx]
-        label_id = self.targets[idx]  # 0~3
+        label_id = int(self.targets[idx])  # 0~3
 
         prompt = (
-            "Classify the following news into one of the options, please answeer with a single charactor 'A', 'B', 'C' or 'D':\n"
-            "A. World\n"
-            "B. Sports\n"
-            "C. Business\n"
-            "D. Sci/Tech\n\n"
+            "Classify the following news into one of the options. "
+            "Please answer with a single character 'A', 'B', 'C' or 'D'.\n"
+            "A. World\nB. Sports\nC. Business\nD. Sci/Tech\n\n"
             f"News: {text}\n"
             "Answer: "
         )
-
         answer = self.option_texts[label_id]
 
-        full_text = prompt + answer
+        # 1) 先各自 tokenize（不加 special tokens）
+        prompt_ids = self.tokenizer(prompt, add_special_tokens=False, return_tensors="pt")["input_ids"][0]
+        ans_ids    = self.tokenizer(answer, add_special_tokens=False, return_tensors="pt")["input_ids"][0]
 
-        enc = self.tokenizer(
-            full_text,
-            max_length=self.max_length,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt",
-        )
+        max_prompt_len = max(1, self.max_length - int(ans_ids.size(0))) 
+        prompt_ids = prompt_ids[:max_prompt_len]                         
 
-        input_ids = enc["input_ids"].squeeze(0)
-        attention_mask = enc["attention_mask"].squeeze(0)
+        full_ids = torch.cat([prompt_ids, ans_ids], dim=0)
+        full_ids = full_ids[:self.max_length]
 
-        labels = input_ids.clone()
+        pad_len = self.max_length - full_ids.size(0)
+        if pad_len > 0:
+            pad_id = self.tokenizer.pad_token_id
+            full_ids = torch.cat([full_ids, torch.full((pad_len,), pad_id, dtype=torch.long)], dim=0)
 
-        prompt_enc = self.tokenizer(
-            prompt,
-            max_length=self.max_length,
-            truncation=True,
-            return_tensors="pt",
-        )
-        prompt_len = prompt_enc["input_ids"].size(1)
+        attention_mask = (full_ids != self.tokenizer.pad_token_id).long()
 
-        labels[:prompt_len] = -100
+        labels = full_ids.clone()
+        labels[:prompt_ids.size(0)] = -100             
+        labels[attention_mask == 0]  = -100            
 
         return {
-            "input_ids": input_ids,
+            "input_ids": full_ids,
             "attention_mask": attention_mask,
             "labels": labels,
-            "option_id": torch.tensor(label_id, dtype=torch.long),
+            "option_id": torch.tensor(label_id).long(),
             "index": idx,
         }
+
