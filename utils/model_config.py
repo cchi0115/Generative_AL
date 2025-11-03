@@ -40,7 +40,7 @@ def get_models(args, nets, model, models=None):
         return m
 
     # --------------------- Text Dataset Branch ---------------------
-    if args.model in ['DistilBert', 'Roberta', 'Llama', 'LlamaCasual']:
+    if args.model in ['DistilBert', 'Roberta', 'Llama', 'LlamaCausal']:
         def load_text_model(num_labels):
             # Load the corresponding text model with the specified number of labels.
             if args.model == 'DistilBert':

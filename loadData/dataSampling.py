@@ -89,8 +89,9 @@ def get_sub_train_dataset(args, dataset, L_index, O_index, U_index, Q_index=None
                 L_total = []
                 O_total = []
                 for i in range(len(dataset)):
-                    sample_labels = dataset[i]['labels']
-                    sample_index = dataset[i]['index']
+                    sample = dataset[i]
+                    sample_labels = sample['option_id'] if 'option_id' in sample else sample['labels']
+                    sample_index = sample['index']
                     
                     if is_in_distribution_sample(sample_labels, len(classes), is_multilabel):
                         L_total.append(sample_index)
@@ -165,8 +166,9 @@ def get_sub_train_dataset(args, dataset, L_index, O_index, U_index, Q_index=None
             if args.textset:
                 L_total = []
                 for i in range(len(dataset)):
-                    sample_labels = dataset[i]['labels']
-                    sample_index = dataset[i]['index']
+                    sample = dataset[i]
+                    sample_labels = sample['option_id'] if 'option_id' in sample else sample['labels']
+                    sample_index = sample['index']
                     
                     if is_in_distribution_sample(sample_labels, len(classes), is_multilabel):
                         L_total.append(sample_index)
@@ -213,7 +215,11 @@ def get_sub_train_dataset(args, dataset, L_index, O_index, U_index, Q_index=None
         
         # Get labels for query indices
         if args.textset:
-            Q_label = [dataset[i]['labels'] for i in Q_index]
+            # Q_label = [dataset[i]['labels'] for i in Q_index]
+            Q_label = [
+                (dataset[i]['option_id'] if 'option_id' in dataset[i] else dataset[i]['labels'])
+                for i in Q_index
+            ]
         else:
             Q_label = [dataset[i][1] for i in Q_index]
 
@@ -253,8 +259,9 @@ def get_sub_test_dataset(args, dataset):
     labeled_index = []
     if args.textset:
         for i in range(len(dataset)):
-            sample_labels = dataset[i]['labels']
-            sample_index = dataset[i]['index']
+            sample = dataset[i]
+            sample_labels = sample['option_id'] if 'option_id' in sample else sample['labels']
+            sample_index = sample['index']
             
             if is_in_distribution_sample(sample_labels, len(classes), is_multilabel):
                 labeled_index.append(sample_index)

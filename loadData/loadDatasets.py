@@ -101,7 +101,7 @@ def get_dataset(args, trial):
             tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
         elif args.model == 'Roberta':
             tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
-        elif args.model == 'Llama' or args.model == 'LlamaCasual':
+        elif args.model == 'Llama' or args.model == 'LlamaCausal':
             tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-hf')
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token

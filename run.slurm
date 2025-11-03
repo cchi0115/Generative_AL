@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=STAR_train
+#SBATCH --job-name=DAL_train
 #SBATCH --account=mg61
 #SBATCH --ntasks=1
 #SBATCH --ntasks-per-node=1
@@ -11,8 +11,8 @@
 #SBATCH --time=08:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=cchi0115@student.monash.edu
-#SBATCH --output=log/%x-%j.out
-#SBATCH --error=log/%x-%j.err
+#SBATCH --output=log/%j.out
+#SBATCH --error=log/%j.err
 
 source ~/mg61_scratch2/ch_env/DALBenchmark/bin/activate
 export HF_HOME=~/mg61_scratch2/chunheng/huggingface

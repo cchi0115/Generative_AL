@@ -94,7 +94,8 @@ class AGNewsCausalLMOptionDataset(Dataset):
         self.data = hf_dataset
         self.tokenizer = tokenizer
         self.max_length = max_length
-        self.targets = hf_dataset['label']
+        texts = hf_dataset['text']
+        labels = hf_dataset['label']
 
         self.option_texts = [
             "A",  # 0: World
@@ -109,40 +110,45 @@ class AGNewsCausalLMOptionDataset(Dataset):
             "Sci/Tech",
         ]
 
+        self.data_texts = list(texts)
+        self.targets    = list(labels)
+
+        # Apply long-tail imbalance if specified (same trigger behavior as MyAGNewsDataset)
         if imbalance_factor:
-            # Extract texts and labels
-            texts = hf_dataset['text']
-            labels = hf_dataset['label']
-
-            # Create a dictionary to store samples for each class
-            class_samples = {cls: [] for cls in range(len(self.classes))}
-
-            # Assign samples to the corresponding class
-            for text, label in zip(texts, labels):
-                class_samples[label].append(text)
-
-            # Compute the number of samples per class to follow a long-tail distribution
+            # Group samples by class id
             num_classes = len(self.classes)
-            max_samples = max(len(samples) for samples in class_samples.values())
-            class_sizes = [int(max_samples * (imbalance_factor ** (i / (num_classes - 1))))
-                        for i in range(num_classes)]
+            class_samples = {cid: [] for cid in range(num_classes)}
+            for t, y in zip(texts, labels):
+                class_samples[int(y)].append(t)
 
-            # Build the imbalanced dataset
-            self.data = []
-            self.targets = []
-            for cls in range(num_classes):
-                samples = class_samples[cls]
-                num_samples = min(len(samples), class_sizes[cls])
-                selected_samples = np.random.choice(samples, num_samples, replace=False)
-                self.data.extend(selected_samples)
-                self.targets.extend([cls] * num_samples)
+            # Long-tail sizes (class 0 最大 → class 3 最小)
+            max_samples = max(len(v) for v in class_samples.values())
+            class_sizes = [
+                int(max_samples * (imbalance_factor ** (i / (num_classes - 1))))
+                for i in range(num_classes)
+            ]
 
+            # Rebuild imbalanced lists
+            new_texts, new_labels = [], []
+            for cid in range(num_classes):
+                samples = class_samples[cid]
+                n_take = min(len(samples), class_sizes[cid])
+                if n_take > 0:
+                    selected = np.random.choice(samples, n_take, replace=False)
+                    new_texts.extend(selected.tolist() if hasattr(selected, "tolist") else list(selected))
+                    new_labels.extend([cid] * n_take)
+
+            self.data_texts = new_texts
+            self.targets    = new_labels
+
+        # Convert targets to torch tensor for consistency (kept as list in __getitem__ for speed)
+        self.targets = list(map(int, self.targets))
 
     def __len__(self):
-        return len(self.data)
+        return len(self.data_texts)
 
     def __getitem__(self, idx):
-        text = self.data[idx]["text"]
+        text = self.data_texts[idx]
         label_id = self.targets[idx]  # 0~3
 
         prompt = (
