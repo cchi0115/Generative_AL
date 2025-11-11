@@ -1,9 +1,6 @@
 # Python
 import time
 import random
-import os
-import gc
-
 
 # Torch
 import torch
@@ -29,7 +26,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args = get_more_args(args)
     print("args: ", args)
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
     # Add global time statistics
     all_select_times = []  # Store selection times for all trials and cycles
@@ -82,7 +78,6 @@ if __name__ == '__main__':
         for cycle in range(args.cycle):
             print("====================Cycle: {}====================".format(cycle + 1))
             # Model (re)initialization
-            models = None
             random_seed = args.seed + trial
             random.seed(random_seed)
             np.random.seed(random_seed)
@@ -148,7 +143,7 @@ if __name__ == '__main__':
             # get query data class
             if args.textset:
                 if args.causal_lm:
-                    Q_classes = [ train_dst[idx]['option_id'].item() for idx in Q_index ]
+                    Q_classes = [ train_dst[idx]['option_id'] for idx in Q_index ]
                 else:
                     Q_classes = [train_dst[idx]['labels'].item() for idx in Q_index]
             else:
@@ -180,10 +175,6 @@ if __name__ == '__main__':
 
             # Log cycle information
             log_cycle_info(logs, cycle, acc, prec, recall, f1, in_cnt, class_counts, select_duration)
-
-            del models, optimizers, schedulers
-            gc.collect()
-            torch.cuda.empty_cache()
 
         # Record timing summary for each trial after it ends
         log_trial_timing_summary(logs, trial, trial_select_times)

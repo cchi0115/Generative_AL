@@ -8,7 +8,7 @@
 #SBATCH --gres=gpu:A100:1
 #SBATCH --partition=fit
 #SBATCH --qos=fitq
-#SBATCH --time=08:00:00
+#SBATCH --time=1-00:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=cchi0115@student.monash.edu
 #SBATCH --output=log/%j.out
@@ -27,5 +27,5 @@ export HUGGINGFACE_HUB_CACHE=~/mg61_scratch2/chunheng/huggingface/hub
 #rm -rf submodlib
 
 python main.py --method Uncertainty --uncertainty Entropy --dataset AGNEWS --textset --model LlamaCausal --causal-lm \
-    --trial 1 --cycle 2 --n-initial 500 --n-query 100 --n-class 4 --epochs 2 --workers 2 --batch-size 4 --test-batch-size 16 \
+    --trial 1 --cycle 3 --n-initial 15000 --n-query 10000 --n-class 4 --epochs 5 --workers 4 --batch-size 4 --test-batch-size 32 \
     --optimizer AdamW --scheduler linear --lr 2e-5 --scheduler StepLR --step_size 9999 --gamma 0.5

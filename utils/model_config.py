@@ -34,10 +34,18 @@ def get_models(args, nets, model, models=None):
     """
     # Helper function to move a model to the proper device and optionally wrap with data parallelism.
     def prepare_model(m):
-        m = m.to(args.device)
-        if args.device != "cpu" and args.data_parallel:
-            m = nets.nets_utils.MyDataParallel(m, device_ids=args.gpu)
-        return m
+        uses_accelerate_map = getattr(m, "hf_device_map", None) is not None
+        has_meta = any(p.is_meta for p in m.parameters())
+        loaded_8bit = getattr(m, "is_loaded_in_8bit", False)
+        loaded_4bit = getattr(m, "is_loaded_in_4bit", False)
+
+        if uses_accelerate_map or has_meta or loaded_8bit or loaded_4bit:
+            return m
+        else:
+            m = m.to(args.device)
+            if args.device != "cpu" and args.data_parallel:
+                m = nets.nets_utils.MyDataParallel(m, device_ids=args.gpu)
+            return m
 
     # --------------------- Text Dataset Branch ---------------------
     if args.model in ['DistilBert', 'Roberta', 'Llama', 'LlamaCausal']:

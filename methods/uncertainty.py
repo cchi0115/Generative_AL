@@ -13,6 +13,7 @@ from .almethod import ALMethod
 import torch
 import numpy as np
 from tqdm import tqdm
+import torch.nn.functional as F
 
 class Uncertainty(ALMethod):
     def __init__(self, args, models, unlabeled_dst, U_index, selection_method="CONF", **kwargs):
@@ -27,6 +28,9 @@ class Uncertainty(ALMethod):
             raise NotImplementedError(f"Selection algorithm '{selection_method}' unavailable.")
         
         self.selection_method = selection_method
+
+        if args.causal_lm:
+            self.tokenizer = models.get("tokenizer", None)
 
     def run(self):
         """
@@ -62,6 +66,11 @@ class Uncertainty(ALMethod):
 
         # For non-MC Dropout methods, a single forward pass is sufficient
         print("| Calculating uncertainty of Unlabeled set...")
+
+        if self.args.causal_lm: 
+            assert self.tokenizer is not None, "tokenizer is required for causal LM uncertainty."
+            return self._rank_uncertainty_causal_lm_abcd_entropy(model, selection_loader)
+
         if self.selection_method in ["CONF", "Entropy", "Margin", "VarRatio"]:
             # In single forward-pass mode, keep the model in eval()
             with torch.no_grad():
@@ -225,3 +234,40 @@ class Uncertainty(ALMethod):
 
         return probs
     
+    def _rank_uncertainty_causal_lm_abcd_entropy(self, model, selection_loader):
+        device = self.args.device
+        tok = self.tokenizer
+
+        def _get_opt_ids():
+            cand = ["A", "B", "C", "D"]
+            ids = tok.convert_tokens_to_ids(cand)
+            if any(i is None or i == tok.unk_token_id for i in ids):
+                cand = ["▁A", "▁B", "▁C", "▁D"]
+                ids = tok.convert_tokens_to_ids(cand)
+            if any(i is None or i == tok.unk_token_id for i in ids):
+                enc = tok(cand, add_special_tokens=False, return_tensors="pt", padding=True)
+                ids = [int(row[0].item()) for row in enc["input_ids"]]
+            return torch.tensor(ids, device=device)
+
+        opt_ids = _get_opt_ids()  # [4]
+
+        score_chunks = []
+        with torch.inference_mode():
+            for batch in tqdm(selection_loader, desc="Causal LM Entropy (ABCD)"):
+                input_ids = batch["input_ids"].to(device, non_blocking=True)            
+                attention_mask = batch["attention_mask"].to(device, non_blocking=True)
+
+                if hasattr(model, "config") and getattr(model.config, "use_cache", None):
+                    model.config.use_cache = False
+
+                out = model(input_ids=input_ids, attention_mask=attention_mask)
+                last_logits = out.logits[:, -1, :]                        
+                abcd_logits = last_logits.index_select(dim=1, index=opt_ids) 
+                probs = F.softmax(abcd_logits, dim=1)                     
+
+                # entropy = -sum p log p
+                ent = -(probs * (probs.clamp_min(1e-12).log())).sum(dim=1)  
+                score_chunks.append(-ent)
+
+        scores = torch.cat(score_chunks, dim=0).detach().cpu().numpy()
+        return scores

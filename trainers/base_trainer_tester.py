@@ -206,7 +206,8 @@ def train_epoch_nlp_casuallm(args, models, criterion, optimizers, dataloaders, w
     tokenizer = models.get("tokenizer", None)
     model.train()
 
-    device = args.device
+    # device = args.device
+    device = model.get_input_embeddings().weight.device
     train_loader = dataloaders["train"]
 
     total_loss = 0.0
@@ -217,13 +218,13 @@ def train_epoch_nlp_casuallm(args, models, criterion, optimizers, dataloaders, w
     tok = tokenizer(option_texts, add_special_tokens=False, return_tensors="pt", padding=True)
     option_tokens = [int(t[0]) for t in tok["input_ids"]]
 
-    option_tokens = torch.tensor(option_tokens, device=device)  # [4]
+    option_tokens = torch.tensor(option_tokens, device=device)
 
     for i, batch in enumerate(train_loader):
-        input_ids = batch["input_ids"].to(device)           # [B, T]
-        attention_mask = batch["attention_mask"].to(device)
-        labels = batch["labels"].to(device)                 # [B, T], prompt = -100
-        option_id = batch["option_id"].to(device)           # [B], 0~3
+        input_ids = batch["input_ids"].to(device, non_blocking=True)           
+        attention_mask = batch["attention_mask"].to(device, non_blocking=True)
+        labels = batch["labels"].to(device, non_blocking=True)                 
+        option_id = batch["option_id"].to(device, non_blocking=True)           
 
         optimizers["backbone"].zero_grad()
 
@@ -428,8 +429,9 @@ def test_nlp_casuallm(args, models, dataloaders):
     Returns:
         (accuracy, precision, recall, f1) with single-label 'weighted' averages.
     """
-    device = args.device
-    model = models["backbone"].to(device)
+    # device = args.device
+    model = models["backbone"]
+    device = model.get_input_embeddings().weight.device
     tokenizer = models.get("tokenizer", None)
     assert tokenizer is not None, "tokenizer is required for causal LM testing."
 
@@ -454,29 +456,22 @@ def test_nlp_casuallm(args, models, dataloaders):
 
     with torch.no_grad():
         for batch in dataloaders["test"]:
-            input_ids = batch["input_ids"].to(device)            # [B, T]
-            attention_mask = batch["attention_mask"].to(device)  # [B, T]
+            input_ids = batch["input_ids"].to(device, non_blocking=True)            # [B, T]
+            attention_mask = batch["attention_mask"].to(device, non_blocking=True)  # [B, T]
 
-            # 2) 前向，取最後一個 token 的 logits
             out = model(input_ids=input_ids, attention_mask=attention_mask)
-            # logits: [B, T, vocab] → 取最後位置
-            last_logits = out.logits[:, -1, :]                    # [B, vocab]
+            last_logits = out.logits[:, -1, :]                    
 
-            # 3) 只抽 A/B/C/D 的 logits，softmax 得到分布
             abcd_logits = last_logits.index_select(dim=1, index=opt_ids)  # [B, 4]
             probs = F.softmax(abcd_logits, dim=1)                         # [B, 4]
             preds = probs.argmax(dim=1)                                    # [B] in {0,1,2,3}
 
-            # 4) 取得真實標籤：
-            #    主要來源：dataset 提供的 'option_id'（建議在 causal LM dataset 中回傳）
             if "option_id" in batch:
-                labels = batch["option_id"].to(device)                     # [B]
+                labels = batch["option_id"].to(device, non_blocking=True)                     # [B]
             else:
-                # 後備方案：從 labels（-100 mask）中找最後一個非 -100 的 token，對應到 A/B/C/D
-                # 若對不上就跳過該筆
                 labels = []
                 if "labels" in batch:
-                    lab = batch["labels"].to(device)                       # [B, T]
+                    lab = batch["labels"].to(device, non_blocking=True)                       # [B, T]
                     for i in range(lab.size(0)):
                         row = lab[i]
                         idxs = (row != -100).nonzero(as_tuple=False).squeeze(-1)
