@@ -133,9 +133,9 @@ def get_dataset(args, trial):
                 test_set = MyAGNewsDataset(agnews_dataset['test'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
                 unlabeled_set = MyAGNewsDataset(agnews_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
             elif args.model == 'LlamaCausal':
-                train_set = AGNewsCausalLMOptionDataset(agnews_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
-                test_set = AGNewsCausalLMOptionDataset(agnews_dataset['test'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
-                unlabeled_set = AGNewsCausalLMOptionDataset(agnews_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
+                train_set = AGNewsCausalLMOptionDataset(agnews_dataset['train'].select(range(1000)), tokenizer=tokenizer, imbalance_factor=args.imb_factor)
+                test_set = AGNewsCausalLMOptionDataset(agnews_dataset['test'].select(range(500)), tokenizer=tokenizer, imbalance_factor=args.imb_factor)
+                unlabeled_set = AGNewsCausalLMOptionDataset(agnews_dataset['train'].select(range(1000)), tokenizer=tokenizer, imbalance_factor=args.imb_factor)
         elif args.dataset == 'TREC6':
             trec6_dataset = load_dataset("trec", trust_remote_code=True)
             train_set = MyTREC6Dataset(trec6_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)

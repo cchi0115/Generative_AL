@@ -89,6 +89,8 @@ def get_models(args, nets, model, models=None):
                 if tokenizer.pad_token is None:
                     tokenizer.pad_token = tokenizer.eos_token
 
+                tokenizer.padding_side = "left"
+
                 lora_cfg = LoraConfig(
                     r=16,
                     lora_alpha=32,

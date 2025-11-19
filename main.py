@@ -13,6 +13,7 @@ from torch.utils.data.sampler import SubsetRandomSampler
 
 # Utils
 from utils import *
+from utils.generate_result import generate_unlabeled_casuallm_with_confidence
 from trainers import *
 
 # Custom
@@ -111,6 +112,33 @@ if __name__ == '__main__':
 
             cluster_centers, cluster_labels, cluster_indices = [], [], []
 
+            sampler_unlabeled = SubsetRandomSampler(U_index)
+            unlabeled_loader = DataLoader(
+                train_dst,
+                sampler=sampler_unlabeled,
+                batch_size=args.batch_size,   # 用 test_batch_size 做生成比較省事
+                num_workers=args.workers
+            )
+            dataloaders['unlabeled'] = unlabeled_loader
+
+            # 輸出 CSV 路徑
+            out_dir = "outputs"
+            os.makedirs(out_dir, exist_ok=True)
+            out_csv = os.path.join(
+                out_dir,
+                f"trial{trial+1}_cycle{cycle+1}_pre_gen_conf.csv"
+            )
+
+            generate_unlabeled_casuallm_with_confidence(
+                args,
+                models,
+                dataloaders['unlabeled'],
+                out_csv
+            )
+
+            torch.cuda.empty_cache()
+            gc.collect()
+
             # Training
             t = time.time()
             train_model(args, trial + 1, models, criterion, optimizers, schedulers, dataloaders, 
@@ -134,6 +162,40 @@ if __name__ == '__main__':
                                   cluster_labels=cluster_labels,
                                   cluster_indices=cluster_indices)
             ALmethod = methods.__dict__[args.method](args, models, unlabeled_dst, U_index, **selection_args)
+            
+            sampler_unlabeled = SubsetRandomSampler(U_index)
+            unlabeled_loader = DataLoader(
+                train_dst,
+                sampler=sampler_unlabeled,
+                batch_size=args.batch_size,   # 用 test_batch_size 做生成比較省事
+                num_workers=args.workers
+            )
+            dataloaders['unlabeled'] = unlabeled_loader
+
+            # 輸出 CSV 路徑
+            out_dir = "./outputs"
+            os.makedirs(out_dir, exist_ok=True)
+            out_csv = os.path.join(
+                out_dir,
+                f"trial{trial+1}_cycle{cycle+1}_unlabeled_gen_conf.csv"
+            )
+
+            generate_unlabeled_casuallm_with_confidence(
+                args,
+                models,
+                dataloaders['unlabeled'],  # 直接沿用 dataloader，index 一致
+                out_csv,
+                max_source_length=getattr(args, "gen_max_source_len", 768),
+                max_new_tokens=getattr(args, "gen_max_new_tokens", 32),
+                do_sample=getattr(args, "gen_do_sample", False),
+                temperature=getattr(args, "gen_temperature", 1.0),
+                top_p=getattr(args, "gen_top_p", 1.0),
+            )
+
+            torch.cuda.empty_cache()
+            gc.collect()
+
+            print(f"[Cycle {cycle+1}] Saved unlabeled generative outputs to {out_csv}")
 
             # Add timing statistics
             select_start_time = time.time()

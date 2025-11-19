@@ -153,7 +153,7 @@ class AGNewsCausalLMOptionDataset(Dataset):
 
         prompt = (
             "Classify the following news into one of the options. "
-            "Please answer with a single character 'A', 'B', 'C' or 'D'.\n"
+            "Please answer with a single capital character 'A', 'B', 'C' or 'D'.\n"
             "A. World\nB. Sports\nC. Business\nD. Sci/Tech\n\n"
             f"News: {text}\n"
             "Answer: "
