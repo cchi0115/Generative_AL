@@ -102,7 +102,7 @@ def get_dataset(args, trial):
         elif args.model == 'Roberta':
             tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
         elif args.model == 'Llama' or args.model == 'LlamaCausal':
-            tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-hf')
+            tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-chat-hf', use_auth_token=True)
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token
         
@@ -134,7 +134,7 @@ def get_dataset(args, trial):
                 unlabeled_set = MyAGNewsDataset(agnews_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
             elif args.model == 'LlamaCausal':
                 train_set = AGNewsCausalLMOptionDataset(agnews_dataset['train'].select(range(1000)), tokenizer=tokenizer, imbalance_factor=args.imb_factor)
-                test_set = AGNewsCausalLMOptionDataset(agnews_dataset['test'].select(range(500)), tokenizer=tokenizer, imbalance_factor=args.imb_factor)
+                test_set = AGNewsCausalLMOptionDataset(agnews_dataset['test'].select(range(300)), tokenizer=tokenizer, imbalance_factor=args.imb_factor)
                 unlabeled_set = AGNewsCausalLMOptionDataset(agnews_dataset['train'].select(range(1000)), tokenizer=tokenizer, imbalance_factor=args.imb_factor)
         elif args.dataset == 'TREC6':
             trec6_dataset = load_dataset("trec", trust_remote_code=True)

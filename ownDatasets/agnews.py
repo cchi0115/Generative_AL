@@ -152,10 +152,10 @@ class AGNewsCausalLMOptionDataset(Dataset):
         label_id = int(self.targets[idx])  # 0~3
 
         prompt = (
-            "Classify the following news into one of the options. "
-            "Please answer with a single capital character 'A', 'B', 'C' or 'D'.\n"
-            "A. World\nB. Sports\nC. Business\nD. Sci/Tech\n\n"
+            "You are a multi-class classifier. Classify the following news into one of the options. "
+            "Please answer with a 'A', 'B', 'C' or 'D'. No extra text\n"
             f"News: {text}\n"
+            "Options:\nA. World\nB. Sports\nC. Business\nD. Sci/Tech\n\n"
             "Answer: "
         )
         answer = self.option_texts[label_id]
@@ -178,7 +178,7 @@ class AGNewsCausalLMOptionDataset(Dataset):
         attention_mask = (full_ids != self.tokenizer.pad_token_id).long()
 
         labels = full_ids.clone()
-        labels[:prompt_ids.size(0)] = -100             
+        # labels[:prompt_ids.size(0)] = -100             
         labels[attention_mask == 0]  = -100            
 
         return {

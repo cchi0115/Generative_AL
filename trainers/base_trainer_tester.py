@@ -441,20 +441,9 @@ def test_nlp_casuallm(args, models, dataloaders):
 
     model.eval()
 
-    cand_sets = [
-        ["A", "B", "C", "D"],
-        ["▁A", "▁B", "▁C", "▁D"],
-    ]
-    opt_ids = None
-    for cand in cand_sets:
-        ids = tokenizer.convert_tokens_to_ids(cand)
-        if all(i is not None and i != tokenizer.unk_token_id for i in ids):
-            opt_ids = torch.tensor(ids, device=device)
-            break
-    if opt_ids is None:
-        cand_enc = tokenizer(["A", "B", "C", "D"], add_special_tokens=False, return_tensors="pt", padding=True)
-        ids = [int(row[0].item()) for row in cand_enc["input_ids"]]
-        opt_ids = torch.tensor(ids, device=device)
+    cand_enc = tokenizer(["A", "B", "C", "D"], add_special_tokens=False, return_tensors="pt", padding=True)
+    ids = [int(row[0].item()) for row in cand_enc["input_ids"]]
+    opt_ids = torch.tensor(ids, device=device)
 
     all_preds, all_labels = [], []
 
@@ -472,33 +461,10 @@ def test_nlp_casuallm(args, models, dataloaders):
             probs = F.softmax(abcd_logits, dim=1)                         # [B, 4]
             preds = probs.argmax(dim=1)                                    # [B] in {0,1,2,3}
 
-            if "option_id" in batch:
-                labels = batch["option_id"].to(device, non_blocking=True)                     # [B]
-            else:
-                labels = []
-                if "labels" in batch:
-                    lab = batch["labels"].to(device, non_blocking=True)                       # [B, T]
-                    for i in range(lab.size(0)):
-                        row = lab[i]
-                        idxs = (row != -100).nonzero(as_tuple=False).squeeze(-1)
-                        if idxs.numel() == 0:
-                            labels.append(-1)
-                            continue
-                        last_idx = idxs[-1].item()
-                        tok_id = int(row[last_idx].item())
-                        # map tok_id → {0,1,2,3}
-                        if tok_id in opt_ids.tolist():
-                            labels.append(opt_ids.tolist().index(tok_id))
-                        else:
-                            labels.append(-1)
-                    labels = torch.tensor(labels, device=device)
-                else:
-                    labels = torch.full((preds.size(0),), -1, device=device, dtype=torch.long)
+            labels = batch["option_id"].to(device, non_blocking=True)                     # [B]
 
-            valid_mask = labels != -1
-            if valid_mask.any():
-                all_preds.extend(preds[valid_mask].detach().cpu().numpy().tolist())
-                all_labels.extend(labels[valid_mask].detach().cpu().numpy().tolist())
+            all_preds.extend(preds.detach().cpu().numpy().tolist())
+            all_labels.extend(labels.detach().cpu().numpy().tolist())
 
     all_preds = np.array(all_preds)
     all_labels = np.array(all_labels)

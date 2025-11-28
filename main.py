@@ -122,7 +122,7 @@ if __name__ == '__main__':
             dataloaders['unlabeled'] = unlabeled_loader
 
             # 輸出 CSV 路徑
-            out_dir = "outputs"
+            out_dir = "outputs_instruction_tuned_conf"
             os.makedirs(out_dir, exist_ok=True)
             out_csv = os.path.join(
                 out_dir,
@@ -138,6 +138,8 @@ if __name__ == '__main__':
 
             torch.cuda.empty_cache()
             gc.collect()
+
+            acc, prec, recall, f1  = evaluate_model(args, models, dataloaders)
 
             # Training
             t = time.time()
@@ -173,8 +175,6 @@ if __name__ == '__main__':
             dataloaders['unlabeled'] = unlabeled_loader
 
             # 輸出 CSV 路徑
-            out_dir = "./outputs"
-            os.makedirs(out_dir, exist_ok=True)
             out_csv = os.path.join(
                 out_dir,
                 f"trial{trial+1}_cycle{cycle+1}_unlabeled_gen_conf.csv"

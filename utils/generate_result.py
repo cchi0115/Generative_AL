@@ -19,6 +19,15 @@ JSON_PATTERN_ANSWER_CONF = re.compile(
     re.IGNORECASE | re.DOTALL
 )
 
+def _build_prompt_casuallm_no_confidence(text: str) -> str:
+    return (
+        "You are a multiple-choice classifier. "
+        + "Read the news and answer in a single character 'A', 'B', 'C' or 'D', no extra text.\n"
+        + "Answer Options:\nA. World\nB. Sports\nC. Business\nD. Sci/Tech\n\n"
+        + f"News: {text}/n"
+        + f"Answer: "
+    )
+
 def _build_prompt_casuallm(text: str) -> str:
     return (
         PROMPT_HEADER_CASUALLM
@@ -42,7 +51,7 @@ def generate_unlabeled_casuallm_with_confidence(
     unlabeled_loader,
     output_path,
     max_source_length: int = 768,
-    max_new_tokens: int = 32,
+    max_new_tokens: int = 20,
     gen_batch_size: int = None,
     do_sample: bool = False,
     temperature: float = 1.0,

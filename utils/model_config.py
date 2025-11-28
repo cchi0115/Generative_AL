@@ -58,8 +58,8 @@ def get_models(args, nets, model, models=None):
                 return RobertaForSequenceClassification.from_pretrained(
                     'roberta-base', num_labels=int(num_labels), output_hidden_states=True)
             elif args.model == 'Llama':
-                config = AutoConfig.from_pretrained('meta-llama/Llama-2-7b-hf', num_labels=int(num_labels), output_hidden_states=True)
-                model = AutoModelForSequenceClassification.from_pretrained('meta-llama/Llama-2-7b-hf', 
+                config = AutoConfig.from_pretrained('meta-llama/Llama-2-7b-chat-hf', num_labels=int(num_labels), output_hidden_states=True)
+                model = AutoModelForSequenceClassification.from_pretrained('meta-llama/Llama-2-7b-chat-hf', 
                                 config=config, device_map="auto")
                 if model.config.pad_token_id is None:
                     model.config.pad_token_id = model.config.eos_token_id
@@ -78,14 +78,14 @@ def get_models(args, nets, model, models=None):
                 return lora_model
             
             elif args.model == 'LlamaCausal':
-                cfg = AutoConfig.from_pretrained('meta-llama/Llama-2-7b-hf')
+                cfg = AutoConfig.from_pretrained('meta-llama/Llama-2-7b-chat-hf', use_auth_token=True)
                 backbone = AutoModelForCausalLM.from_pretrained(
-                    'meta-llama/Llama-2-7b-hf',
+                    'meta-llama/Llama-2-7b-chat-hf',
                     config=cfg,
                     device_map="auto"
                 )
 
-                tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-hf')
+                tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-chat-hf', use_auth_token=True)
                 if tokenizer.pad_token is None:
                     tokenizer.pad_token = tokenizer.eos_token
 
