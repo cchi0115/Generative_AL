@@ -69,6 +69,8 @@ parser.add_argument("--no-ssl-save", action="store_false", dest="ssl_save", help
 parser.add_argument('--is_multilabel', action='store_true', help='multi-label classification task')
 parser.add_argument("--causal-lm", action="store_true",
                     help="use causal LM (LLama) with ABCD option probing")
+parser.add_argument("--free-form", action="store_true", help="free-form generation task")
+
 # Balanced Subset Selection Parameters 
 parser.add_argument('--samples-per-class', type=int, default=None,
                    help='Number of samples to select per class for balanced subset. '

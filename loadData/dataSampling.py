@@ -77,168 +77,189 @@ def get_sub_train_dataset(args, dataset, L_index, O_index, U_index, Q_index=None
         If initial=True: A tuple of (L_index, O_index, U_index)
         If initial=False: A tuple of (L_index, O_index, U_index, num_in_query)
     """
-    classes = args.target_list
-    budget = args.n_initial
-    ood_rate = args.ood_rate
-    is_multilabel = getattr(args, 'is_multilabel', False)
+    if getattr(args, "dataset", "").upper() == "GSM8K":
+        n_samples = len(dataset)
+        all_indices = list(range(n_samples))
+        budget = args.n_initial 
 
-    if initial:
-        if args.openset:
-            # Handle text datasets differently
-            if args.textset:
-                L_total = []
-                O_total = []
-                for i in range(len(dataset)):
-                    sample = dataset[i]
-                    sample_labels = sample['option_id'] if 'option_id' in sample else sample['labels']
-                    sample_index = sample['index']
-                    
-                    if is_in_distribution_sample(sample_labels, len(classes), is_multilabel):
-                        L_total.append(sample_index)
-                    else:
-                        O_total.append(sample_index)
-            else:
-                # Handle image datasets
-                L_total = []
-                O_total = []
-                for i in range(len(dataset)):
-                    sample_labels = dataset[i][1]
-                    sample_index = dataset[i][2]
-                    
-                    if is_in_distribution_sample(sample_labels, len(classes), is_multilabel):
-                        L_total.append(sample_index)
-                    else:
-                        O_total.append(sample_index)
+        if initial:
+            budget = min(budget, n_samples)
+            L_index = random.sample(all_indices, budget)
+            O_index = [] 
+            U_index = list(set(all_indices) - set(L_index))
 
-            # Calculate number of OOD samples based on ood_rate
-            n_ood = round(ood_rate * (len(L_total) + len(O_total)))
-
-            # Check if we have enough OOD samples
-            if n_ood > len(O_total):
-                print('The currently designed number of OOD samples is ' + str(n_ood) + ', but the actual number of OOD samples in the dataset is only ' + str(len(O_total)) + '.')
-                print('Using all OOD data and adjusting the ID data to maintain the OOD rate.')
-                n_ood = len(O_total)
-                n_id = round(len(O_total)/ood_rate - len(O_total))
-                # Make sure we don't sample more than available
-                n_id = min(n_id, len(L_total))
-                L_total = random.sample(L_total, n_id)
-            else:
-                # Sample OOD based on calculated number
-                O_total = random.sample(O_total, n_ood)
-            
-            print("# Total in: {}, ood: {}".format(len(L_total), len(O_total)))
-            
-            # Initialize indices for labeled and unlabeled sets
-            if len(L_total) < budget - int(budget * ood_rate):
-                print("Warning: Not enough in-distribution samples for requested budget.")
-                L_index = L_total  # Use all available in-distribution samples
-            else:
-                L_index = random.sample(L_total, budget - int(budget * ood_rate))
-            
-            if len(O_total) < int(budget * ood_rate):
-                print("Warning: Not enough OOD samples for requested budget.")
-                O_index = O_total  # Use all available OOD samples
-            else:
-                O_index = random.sample(O_total, int(budget * ood_rate))
-            
-            # Create unlabeled set
-            U_index = list(set(L_total + O_total) - set(L_index) - set(O_index))
-            
-            # Report statistics
-            if args.method == 'EPIG':
-                print("# Labeled in: {}, ood: {}, Unlabeled: {}".format(
-                    len(L_index), 
-                    len(O_index), 
-                    len(U_index) - args.num_IN_class * args.target_per_class
-                ))
-            else:
-                print("# Labeled in: {}, ood: {}, Unlabeled: {}".format(
-                    len(L_index), 
-                    len(O_index), 
-                    len(U_index)
-                ))
+            print(f"[GSM8K] Initial split -> Labeled: {len(L_index)}, Unlabeled: {len(U_index)}, OOD: {len(O_index)}")
+            return L_index, O_index, U_index
         else:
-            # No open set (closed set scenario)
-            ood_rate = 0
-            O_index = []  # Initialize as empty list
-            
-            # Handle text datasets differently
-            if args.textset:
-                L_total = []
-                for i in range(len(dataset)):
-                    sample = dataset[i]
-                    sample_labels = sample['option_id'] if 'option_id' in sample else sample['labels']
-                    sample_index = sample['index']
-                    
-                    if is_in_distribution_sample(sample_labels, len(classes), is_multilabel):
-                        L_total.append(sample_index)
-            else:
-                L_total = []
-                for i in range(len(dataset)):
-                    sample_labels = dataset[i][1]
-                    sample_index = dataset[i][2]
-                    
-                    if is_in_distribution_sample(sample_labels, len(classes), is_multilabel):
-                        L_total.append(sample_index)
-            
-            O_total = []
-            n_ood = 0
-            print("# Total in: {}, ood: {}".format(len(L_total), len(O_total)))
+            Q_index = list(Q_index)
+            L_index = list(L_index) + Q_index
+            U_index = list(set(U_index) - set(Q_index))
+            print(f"[GSM8K] Update after query -> Labeled: {len(L_index)}, Unlabeled: {len(U_index)}, OOD: {len(O_index)}")
+            return L_index, O_index, U_index, len(Q_index)
 
-            # Make sure we don't sample more than available
-            budget_adjusted = min(int(budget), len(L_total))
-            if budget_adjusted < budget:
-                print(f"Warning: Requested budget {budget} exceeds available samples {len(L_total)}.")
-                print(f"Using all {len(L_total)} available samples.")
-            
-            L_index = random.sample(L_total, budget_adjusted)
-            U_index = list(set(L_total) - set(L_index))
-            
-            if args.method == 'EPIG':
-                print("# Labeled in: {}, ood: {}, Unlabeled: {}".format(
-                    len(L_index), 
-                    len(O_index), 
-                    len(U_index) - args.num_IN_class * args.target_per_class
-                ))
-            else:
-                print("# Labeled in: {}, ood: {}, Unlabeled: {}".format(
-                    len(L_index), 
-                    len(O_index), 
-                    len(U_index)
-                ))
-
-        return L_index, O_index, U_index
-    
     else:
-        # Non-initial round (update after query)
-        Q_index = list(Q_index)  # Ensure Q_index is a list
-        
-        # Get labels for query indices
-        if args.textset:
-            # Q_label = [dataset[i]['labels'] for i in Q_index]
-            Q_label = [
-                (dataset[i]['option_id'] if 'option_id' in dataset[i] else dataset[i]['labels'])
-                for i in Q_index
-            ]
-        else:
-            Q_label = [dataset[i][1] for i in Q_index]
+        classes = args.target_list
+        budget = args.n_initial
+        ood_rate = args.ood_rate
+        is_multilabel = getattr(args, 'is_multilabel', False)
 
-        # Separate in-distribution and OOD queries
-        in_Q_index, ood_Q_index = [], []
-        for i, sample_labels in enumerate(Q_label):
-            if is_in_distribution_sample(sample_labels, len(classes), is_multilabel):
-                in_Q_index.append(Q_index[i])
+        if initial:
+            if args.openset:
+                # Handle text datasets differently
+                if args.textset:
+                    L_total = []
+                    O_total = []
+                    for i in range(len(dataset)):
+                        sample = dataset[i]
+                        sample_labels = sample['option_id'] if 'option_id' in sample else sample['labels']
+                        sample_index = sample['index']
+                        
+                        if is_in_distribution_sample(sample_labels, len(classes), is_multilabel):
+                            L_total.append(sample_index)
+                        else:
+                            O_total.append(sample_index)
+                else:
+                    # Handle image datasets
+                    L_total = []
+                    O_total = []
+                    for i in range(len(dataset)):
+                        sample_labels = dataset[i][1]
+                        sample_index = dataset[i][2]
+                        
+                        if is_in_distribution_sample(sample_labels, len(classes), is_multilabel):
+                            L_total.append(sample_index)
+                        else:
+                            O_total.append(sample_index)
+
+                # Calculate number of OOD samples based on ood_rate
+                n_ood = round(ood_rate * (len(L_total) + len(O_total)))
+
+                # Check if we have enough OOD samples
+                if n_ood > len(O_total):
+                    print('The currently designed number of OOD samples is ' + str(n_ood) + ', but the actual number of OOD samples in the dataset is only ' + str(len(O_total)) + '.')
+                    print('Using all OOD data and adjusting the ID data to maintain the OOD rate.')
+                    n_ood = len(O_total)
+                    n_id = round(len(O_total)/ood_rate - len(O_total))
+                    # Make sure we don't sample more than available
+                    n_id = min(n_id, len(L_total))
+                    L_total = random.sample(L_total, n_id)
+                else:
+                    # Sample OOD based on calculated number
+                    O_total = random.sample(O_total, n_ood)
+                
+                print("# Total in: {}, ood: {}".format(len(L_total), len(O_total)))
+                
+                # Initialize indices for labeled and unlabeled sets
+                if len(L_total) < budget - int(budget * ood_rate):
+                    print("Warning: Not enough in-distribution samples for requested budget.")
+                    L_index = L_total  # Use all available in-distribution samples
+                else:
+                    L_index = random.sample(L_total, budget - int(budget * ood_rate))
+                
+                if len(O_total) < int(budget * ood_rate):
+                    print("Warning: Not enough OOD samples for requested budget.")
+                    O_index = O_total  # Use all available OOD samples
+                else:
+                    O_index = random.sample(O_total, int(budget * ood_rate))
+                
+                # Create unlabeled set
+                U_index = list(set(L_total + O_total) - set(L_index) - set(O_index))
+                
+                # Report statistics
+                if args.method == 'EPIG':
+                    print("# Labeled in: {}, ood: {}, Unlabeled: {}".format(
+                        len(L_index), 
+                        len(O_index), 
+                        len(U_index) - args.num_IN_class * args.target_per_class
+                    ))
+                else:
+                    print("# Labeled in: {}, ood: {}, Unlabeled: {}".format(
+                        len(L_index), 
+                        len(O_index), 
+                        len(U_index)
+                    ))
             else:
-                ood_Q_index.append(Q_index[i])
+                # No open set (closed set scenario)
+                ood_rate = 0
+                O_index = []  # Initialize as empty list
+                
+                # Handle text datasets differently
+                if args.textset:
+                    L_total = []
+                    for i in range(len(dataset)):
+                        sample = dataset[i]
+                        sample_labels = sample['option_id'] if 'option_id' in sample else sample['labels']
+                        sample_index = sample['index']
+                        
+                        if is_in_distribution_sample(sample_labels, len(classes), is_multilabel):
+                            L_total.append(sample_index)
+                else:
+                    L_total = []
+                    for i in range(len(dataset)):
+                        sample_labels = dataset[i][1]
+                        sample_index = dataset[i][2]
+                        
+                        if is_in_distribution_sample(sample_labels, len(classes), is_multilabel):
+                            L_total.append(sample_index)
+                
+                O_total = []
+                n_ood = 0
+                print("# Total in: {}, ood: {}".format(len(L_total), len(O_total)))
+
+                # Make sure we don't sample more than available
+                budget_adjusted = min(int(budget), len(L_total))
+                if budget_adjusted < budget:
+                    print(f"Warning: Requested budget {budget} exceeds available samples {len(L_total)}.")
+                    print(f"Using all {len(L_total)} available samples.")
+                
+                L_index = random.sample(L_total, budget_adjusted)
+                U_index = list(set(L_total) - set(L_index))
+                
+                if args.method == 'EPIG':
+                    print("# Labeled in: {}, ood: {}, Unlabeled: {}".format(
+                        len(L_index), 
+                        len(O_index), 
+                        len(U_index) - args.num_IN_class * args.target_per_class
+                    ))
+                else:
+                    print("# Labeled in: {}, ood: {}, Unlabeled: {}".format(
+                        len(L_index), 
+                        len(O_index), 
+                        len(U_index)
+                    ))
+
+            return L_index, O_index, U_index
         
-        print("# query in: {}, ood: {}".format(len(in_Q_index), len(ood_Q_index)))
-        
-        # Update indices
-        L_index = list(L_index) + in_Q_index  # Ensure L_index is a list before addition
-        print("# Now labelled in: {}".format(len(L_index)))
-        
-        O_index = list(O_index) + ood_Q_index  # Ensure O_index is a list before addition
-        U_index = list(set(U_index) - set(Q_index))
+        else:
+            # Non-initial round (update after query)
+            Q_index = list(Q_index)  # Ensure Q_index is a list
+            
+            # Get labels for query indices
+            if args.textset:
+                # Q_label = [dataset[i]['labels'] for i in Q_index]
+                Q_label = [
+                    (dataset[i]['option_id'] if 'option_id' in dataset[i] else dataset[i]['labels'])
+                    for i in Q_index
+                ]
+            else:
+                Q_label = [dataset[i][1] for i in Q_index]
+
+            # Separate in-distribution and OOD queries
+            in_Q_index, ood_Q_index = [], []
+            for i, sample_labels in enumerate(Q_label):
+                if is_in_distribution_sample(sample_labels, len(classes), is_multilabel):
+                    in_Q_index.append(Q_index[i])
+                else:
+                    ood_Q_index.append(Q_index[i])
+            
+            print("# query in: {}, ood: {}".format(len(in_Q_index), len(ood_Q_index)))
+            
+            # Update indices
+            L_index = list(L_index) + in_Q_index  # Ensure L_index is a list before addition
+            print("# Now labelled in: {}".format(len(L_index)))
+            
+            O_index = list(O_index) + ood_Q_index  # Ensure O_index is a list before addition
+            U_index = list(set(U_index) - set(Q_index))
         
         return L_index, O_index, U_index, len(in_Q_index)
 
@@ -253,25 +274,31 @@ def get_sub_test_dataset(args, dataset):
     Returns:
         Indices of in-distribution test samples
     """
-    classes = args.target_list
-    is_multilabel = getattr(args, 'is_multilabel', False)
+    if args.free_form:
+        indices = list(range(len(dataset)))
+        print(f"[GSM8K] Test set size: {len(indices)} (all samples)")
+        return indices
+    
+    else:
+        classes = args.target_list
+        is_multilabel = getattr(args, 'is_multilabel', False)
 
-    labeled_index = []
-    if args.textset:
-        for i in range(len(dataset)):
-            sample = dataset[i]
-            sample_labels = sample['option_id'] if 'option_id' in sample else sample['labels']
-            sample_index = sample['index']
+        labeled_index = []
+        if args.textset:
+            for i in range(len(dataset)):
+                sample = dataset[i]
+                sample_labels = sample['option_id'] if 'option_id' in sample else sample['labels']
+                sample_index = sample['index']
+                
+                if is_in_distribution_sample(sample_labels, len(classes), is_multilabel):
+                    labeled_index.append(sample_index)
+        else: 
+            # for image datasets
+            for i in range(len(dataset)):
+                sample_labels = dataset[i][1]
+                sample_index = dataset[i][2]
+                
+                if is_in_distribution_sample(sample_labels, len(classes), is_multilabel):
+                    labeled_index.append(sample_index)
             
-            if is_in_distribution_sample(sample_labels, len(classes), is_multilabel):
-                labeled_index.append(sample_index)
-    else: 
-        # for image datasets
-        for i in range(len(dataset)):
-            sample_labels = dataset[i][1]
-            sample_index = dataset[i][2]
-            
-            if is_in_distribution_sample(sample_labels, len(classes), is_multilabel):
-                labeled_index.append(sample_index)
-        
-    return labeled_index
+        return labeled_index

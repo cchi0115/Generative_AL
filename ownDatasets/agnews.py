@@ -152,10 +152,10 @@ class AGNewsCausalLMOptionDataset(Dataset):
         label_id = int(self.targets[idx])  # 0~3
 
         prompt = (
-            "You are a multi-class classifier. Classify the following news into one of the options. "
-            "Please answer with a 'A', 'B', 'C' or 'D'. No extra text\n"
+            "Classify the following news into one of the options. "
+            "Please answer with a single capital character 'A', 'B', 'C' or 'D'.\n"
+            "A. World\nB. Sports\nC. Business\nD. Sci/Tech\n\n"
             f"News: {text}\n"
-            "Options:\nA. World\nB. Sports\nC. Business\nD. Sci/Tech\n\n"
             "Answer: "
         )
         answer = self.option_texts[label_id]
@@ -178,7 +178,7 @@ class AGNewsCausalLMOptionDataset(Dataset):
         attention_mask = (full_ids != self.tokenizer.pad_token_id).long()
 
         labels = full_ids.clone()
-        # labels[:prompt_ids.size(0)] = -100             
+        labels[:prompt_ids.size(0)] = -100             
         labels[attention_mask == 0]  = -100            
 
         return {
@@ -189,3 +189,100 @@ class AGNewsCausalLMOptionDataset(Dataset):
             "index": idx,
         }
 
+
+class AGNewsCausalLMLabelDataset(Dataset):
+    def __init__(self, hf_dataset, tokenizer, max_length=128, imbalance_factor=1.0):
+        self.data = hf_dataset
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        texts = hf_dataset['text']
+        labels = hf_dataset['label']
+
+        self.label_texts = [
+            "World",      # 0
+            "Sports",     # 1
+            "Business",   # 2
+            "Sci/Tech",   # 3
+        ]
+        self.classes = self.label_texts
+
+        self.data_texts = list(texts)
+        self.targets    = list(labels)
+
+        if imbalance_factor:
+            num_classes = len(self.classes)
+            class_samples = {cid: [] for cid in range(num_classes)}
+            for t, y in zip(texts, labels):
+                class_samples[int(y)].append(t)
+
+            max_samples = max(len(v) for v in class_samples.values())
+            class_sizes = [
+                int(max_samples * (imbalance_factor ** (i / (num_classes - 1))))
+                for i in range(num_classes)
+            ]
+
+            new_texts, new_labels = [], []
+            for cid in range(num_classes):
+                samples = class_samples[cid]
+                n_take = min(len(samples), class_sizes[cid])
+                if n_take > 0:
+                    selected = np.random.choice(samples, n_take, replace=False)
+                    new_texts.extend(selected.tolist() if hasattr(selected, "tolist") else list(selected))
+                    new_labels.extend([cid] * n_take)
+
+            self.data_texts = new_texts
+            self.targets    = new_labels
+
+        self.targets = list(map(int, self.targets))
+
+    def __len__(self):
+        return len(self.data_texts)
+
+    def __getitem__(self, idx):
+        text = self.data_texts[idx]
+        label_id = int(self.targets[idx])  # 0~3
+
+        prompt = (
+            "Read the news and classify it into World, Sports, Business or Sci/Tech. No explanation.\n"
+            f"News: {text}/n"
+            f"Class: "
+        )
+        # 這裡答案改成自然語言
+        answer = self.label_texts[label_id]
+
+        # 1) 各自 tokenize（不加 special tokens）
+        prompt_ids = self.tokenizer(prompt, add_special_tokens=False, return_tensors="pt")["input_ids"][0]
+        ans_ids    = self.tokenizer(answer, add_special_tokens=False, return_tensors="pt")["input_ids"][0]
+
+        # 控制總長度不超過 max_length
+        max_prompt_len = max(1, self.max_length - int(ans_ids.size(0)))
+        prompt_ids = prompt_ids[:max_prompt_len]
+
+        # concat prompt + answer
+        full_ids = torch.cat([prompt_ids, ans_ids], dim=0)
+        full_ids = full_ids[:self.max_length]
+
+        # padding
+        pad_len = self.max_length - full_ids.size(0)
+        if pad_len > 0:
+            pad_id = self.tokenizer.pad_token_id
+            full_ids = torch.cat(
+                [torch.full((pad_len,), pad_id, dtype=torch.long), full_ids],
+                dim=0
+            )
+
+        attention_mask = (full_ids != self.tokenizer.pad_token_id).long()
+
+        # label：只對 answer 部分計算 loss
+        labels = full_ids.clone()
+        labels[:prompt_ids.size(0) + pad_len] = -100
+        labels[attention_mask == 0] = -100
+
+        return {
+            "input_ids": full_ids,
+            "attention_mask": attention_mask,
+            "labels": labels,
+            "option_id": torch.tensor(label_id).long(),  # 仍然給 0~3 class id，方便算 accuracy
+            "index": idx,
+            "prompt": prompt,
+        }

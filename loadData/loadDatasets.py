@@ -11,7 +11,8 @@ from ownDatasets.cifar10 import MyCIFAR10
 from ownDatasets.cifar100 import MyCIFAR100
 from ownDatasets.mnist import MyMNIST
 from ownDatasets.svhn import MySVHN
-from ownDatasets.agnews import MyAGNewsDataset, AGNewsCausalLMOptionDataset
+from ownDatasets.agnews import MyAGNewsDataset, AGNewsCausalLMOptionDataset, AGNewsCausalLMLabelDataset
+from ownDatasets.gsm8k import GSM8KCausalLMDataset
 from ownDatasets.imdb import MyIMDBDataset
 from ownDatasets.sst5 import MySST5Dataset
 from ownDatasets.dbpedia import MyDbpediaDataset
@@ -102,7 +103,7 @@ def get_dataset(args, trial):
         elif args.model == 'Roberta':
             tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
         elif args.model == 'Llama' or args.model == 'LlamaCausal':
-            tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-chat-hf', use_auth_token=True)
+            tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-hf')
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token
         
@@ -133,14 +134,19 @@ def get_dataset(args, trial):
                 test_set = MyAGNewsDataset(agnews_dataset['test'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
                 unlabeled_set = MyAGNewsDataset(agnews_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
             elif args.model == 'LlamaCausal':
-                train_set = AGNewsCausalLMOptionDataset(agnews_dataset['train'].select(range(1000)), tokenizer=tokenizer, imbalance_factor=args.imb_factor)
-                test_set = AGNewsCausalLMOptionDataset(agnews_dataset['test'].select(range(300)), tokenizer=tokenizer, imbalance_factor=args.imb_factor)
-                unlabeled_set = AGNewsCausalLMOptionDataset(agnews_dataset['train'].select(range(1000)), tokenizer=tokenizer, imbalance_factor=args.imb_factor)
+                train_set = AGNewsCausalLMLabelDataset(agnews_dataset['train'].select(range(15000)), tokenizer=tokenizer, imbalance_factor=args.imb_factor)
+                test_set = AGNewsCausalLMLabelDataset(agnews_dataset['test'].select(range(1000)), tokenizer=tokenizer, imbalance_factor=args.imb_factor)
+                unlabeled_set = AGNewsCausalLMLabelDataset(agnews_dataset['train'].select(range(15000)), tokenizer=tokenizer, imbalance_factor=args.imb_factor)
         elif args.dataset == 'TREC6':
             trec6_dataset = load_dataset("trec", trust_remote_code=True)
             train_set = MyTREC6Dataset(trec6_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
             test_set = MyTREC6Dataset(trec6_dataset['test'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
             unlabeled_set = MyTREC6Dataset(trec6_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
+        elif args.dataset == "GSM8K":
+            gsm8k_dataset = load_dataset("openai/gsm8k", "main")
+            train_set = GSM8KCausalLMDataset(gsm8k_dataset['train'], tokenizer=tokenizer)
+            test_set = GSM8KCausalLMDataset(gsm8k_dataset['test'], tokenizer=tokenizer)
+            unlabeled_set = GSM8KCausalLMDataset(gsm8k_dataset['train'], tokenizer=tokenizer)
 
         else:
             raise ValueError(f"Text dataset '{args.dataset}' is not supported. Please choose from the available text datasets.")
@@ -206,10 +212,11 @@ def get_dataset(args, trial):
         print(f"=== Test-train distribution consistency ensured ===\n")
 
     # Apply class conversion for different dataset types
-    _apply_class_conversion(args, train_set, test_set, unlabeled_set)
+    if not args.free_form:
+        _apply_class_conversion(args, train_set, test_set, unlabeled_set)
     
-    # Report split statistics
-    _report_split_statistics(args, unlabeled_set, test_set)
+        # Report split statistics
+        _report_split_statistics(args, unlabeled_set, test_set)
     
     return train_set, unlabeled_set, test_set
 

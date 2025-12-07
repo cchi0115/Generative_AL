@@ -8,6 +8,8 @@ import numpy as np
 from sklearn.metrics import f1_score, recall_score, precision_score, accuracy_score
 from sklearn.metrics import hamming_loss, jaccard_score
 import torch.nn.functional as F
+import re
+
 
 def train(args, trial, models, criterion, optimizers, schedulers, dataloaders, writer=None):
     """
@@ -34,7 +36,7 @@ def train(args, trial, models, criterion, optimizers, schedulers, dataloaders, w
             if not args.causal_lm:
                 epoch_loss, epoch_accuracy = train_epoch_nlp(args, models, criterion, optimizers, dataloaders, writer, epoch)
             else:
-                epoch_loss, epoch_accuracy = train_epoch_nlp_casuallm(args, models, criterion, optimizers, dataloaders, writer, epoch)
+                epoch_loss, epoch_accuracy = train_epoch_nlp_casuallm_1(args, models, criterion, optimizers, dataloaders, writer, epoch)
 
         else:
             epoch_loss, epoch_accuracy = train_epoch(args, models, criterion, optimizers, dataloaders, writer, epoch)
@@ -257,6 +259,199 @@ def train_epoch_nlp_casuallm(args, models, criterion, optimizers, dataloaders, w
     print(f"[Train causal LM] Epoch {epoch}: loss={avg_loss:.4f}, acc={avg_acc:.4f}")
     return avg_loss, avg_acc
 
+def _normalize_text(s: str) -> str:
+    s = s.strip()
+    s = re.sub(r"\s+", " ", s)
+    return s.lower()
+
+def _find_label(s, label_texts):
+    pos = []
+    for l in label_texts:
+        idx = s.find(l)
+        idx = idx if idx>=0 else len(label_texts)
+        pos.append(idx)
+    
+    return pos.index(min(pos))
+
+def _extract_final_answer_from_gsm8k(answer_text: str) -> str:
+    if "####" in answer_text:
+        final = answer_text.split("####")[-1].strip()
+        return final
+    elif "The final answer is:" in answer_text:
+        final = answer_text.aplit("The final answer is:")[-1].strip()
+        return final
+    return answer_text.strip()
+
+def _extract_last_number_from_text(text: str):
+    text = text.replace(",", "")
+    nums = re.findall(r"-?\d+\.?\d*", text)
+    if not nums:
+        return None
+    return nums[-1]
+
+def _normalize_number_str(s: str) -> str:
+    s = s.strip()
+    s = s.replace(",", "")
+    try:
+        v = float(s)
+        if abs(v - int(v)) < 1e-9:
+            return str(int(v))
+        else:
+            return str(v)
+    except Exception:
+        return s
+    
+
+def train_epoch_nlp_casuallm_1(args, models, criterion, optimizers, dataloaders, writer, epoch):
+    model = models["backbone"]
+    model.train()
+
+    device = model.get_input_embeddings().weight.device
+    train_loader = dataloaders["train"]
+
+    total_loss = 0.0
+    total_samples = 0
+
+
+    for i, batch in enumerate(train_loader):
+        input_ids = batch["input_ids"].to(device, non_blocking=True)
+        attention_mask = batch["attention_mask"].to(device, non_blocking=True)
+        labels = batch["labels"].to(device, non_blocking=True)
+
+        optimizers["backbone"].zero_grad()
+
+        out = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=labels,
+        )
+        loss = out.loss
+        loss.backward()
+        optimizers["backbone"].step()
+
+        bs = input_ids.size(0)
+        total_loss += loss.item() * bs
+        total_samples += bs
+
+
+    avg_loss = total_loss / max(total_samples, 1)
+
+    print(f"[Train causal LM] Epoch {epoch}: loss={avg_loss:.4f}")
+    return avg_loss, 0
+
+
+def test_nlp_casuallm_1(args, models, dataloaders):
+    model = models["backbone"]
+    tokenizer = models.get("tokenizer", None)
+    assert tokenizer is not None
+
+    device = model.get_input_embeddings().weight.device
+    model.eval()
+
+    test_loader = dataloaders["test"]
+
+    if args.dataset == "AGNEWS":
+        label_texts = ["World", "Sports", "Business", "Sci/Tech"]
+        norm_label_texts = [_normalize_text(t) for t in label_texts]
+        num_classes = len(label_texts)
+
+        all_preds = []
+        all_labels = []
+
+        with torch.no_grad():
+            for idx, batch in enumerate(test_loader):
+                input_ids = batch["input_ids"].to(device, non_blocking=True)
+                attention_mask = batch["attention_mask"].to(device, non_blocking=True)
+                option_id = batch["option_id"].to(device, non_blocking=True)  # gold class 0~3
+
+                gen_ids = model.generate(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    max_new_tokens=128,
+                    do_sample=False,
+                    eos_token_id=tokenizer.eos_token_id,
+                    pad_token_id=tokenizer.pad_token_id,
+                )
+
+                new_tokens = gen_ids[:, input_ids.size(1):]   # [B, L_new]
+                decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
+
+                for gold, text in zip(option_id, decoded):
+                    gold_label = int(gold.item())
+                    pred_norm = _normalize_text(text)
+                    pred_class = _find_label(pred_norm, norm_label_texts)
+                    if idx == 0:
+                        print("GOLD:", gold, "\ntext:", text)
+
+                    all_labels.append(gold_label)
+                    all_preds.append(pred_class)
+
+        all_labels = np.array(all_labels)
+        all_preds = np.array(all_preds)
+
+        accuracy = accuracy_score(all_labels, all_preds)
+        precision = precision_score(all_labels, all_preds, average="weighted", zero_division=0)
+        recall = recall_score(all_labels, all_preds, average="weighted", zero_division=0)
+        f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
+
+        print("Causal-LM NLP Test Results (AGNEWS, generate + exact label text):")
+        print(f"* Accuracy:  {accuracy:.3f}")
+        print(f"* Precision: {precision:.3f}")
+        print(f"* Recall:    {recall:.3f}")
+        print(f"* F1 Score:  {f1:.3f}")
+
+        return accuracy, precision, recall, f1
+
+    elif args.dataset == "GSM8K":
+        all_gold = []
+        all_pred = []
+        total_samples = 0
+        correct = 0
+
+        with torch.no_grad():
+            for batch in test_loader:
+                input_ids = batch["input_ids"].to(device, non_blocking=True)
+                attention_mask = batch["attention_mask"].to(device, non_blocking=True)
+
+                target_final_answer = batch["target_final_answer"]  # list of str
+
+                gen_ids = model.generate(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    max_new_tokens=128,
+                    do_sample=False,
+                    eos_token_id=tokenizer.eos_token_id,
+                    pad_token_id=tokenizer.pad_token_id,
+                )
+
+                new_tokens = gen_ids[:, input_ids.size(1):]
+                decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
+
+                for gold_str, pred_text in zip(target_final_answer, decoded):
+                    gold_num = _normalize_number_str(gold_str)
+                    pred_num_raw = _extract_last_number_from_text(pred_text)
+                    pred_num = _normalize_number_str(pred_num_raw) if pred_num_raw is not None else None
+
+                    all_gold.append(gold_num)
+                    all_pred.append(pred_num if pred_num is not None else "NONE")
+
+                    total_samples += 1
+                    if (pred_num is not None) and (pred_num == gold_num):
+                        correct += 1
+
+        accuracy = correct / max(total_samples, 1)
+
+        print("Causal-LM NLP Test Results (GSM8K, numeric answer exact match):")
+        print(f"* Accuracy: {accuracy:.3f}")
+        print(f"* Total samples: {total_samples}")
+        print(f"* Correct: {correct}")
+
+        return accuracy, None, None, None
+
+    else:
+        raise ValueError(f"Unsupported dataset: {args.dataset}")
+
+
 
 def test(args, models, dataloaders):
     """
@@ -441,9 +636,20 @@ def test_nlp_casuallm(args, models, dataloaders):
 
     model.eval()
 
-    cand_enc = tokenizer(["A", "B", "C", "D"], add_special_tokens=False, return_tensors="pt", padding=True)
-    ids = [int(row[0].item()) for row in cand_enc["input_ids"]]
-    opt_ids = torch.tensor(ids, device=device)
+    cand_sets = [
+        ["A", "B", "C", "D"],
+        ["▁A", "▁B", "▁C", "▁D"],
+    ]
+    opt_ids = None
+    for cand in cand_sets:
+        ids = tokenizer.convert_tokens_to_ids(cand)
+        if all(i is not None and i != tokenizer.unk_token_id for i in ids):
+            opt_ids = torch.tensor(ids, device=device)
+            break
+    if opt_ids is None:
+        cand_enc = tokenizer(["A", "B", "C", "D"], add_special_tokens=False, return_tensors="pt", padding=True)
+        ids = [int(row[0].item()) for row in cand_enc["input_ids"]]
+        opt_ids = torch.tensor(ids, device=device)
 
     all_preds, all_labels = [], []
 
@@ -461,10 +667,33 @@ def test_nlp_casuallm(args, models, dataloaders):
             probs = F.softmax(abcd_logits, dim=1)                         # [B, 4]
             preds = probs.argmax(dim=1)                                    # [B] in {0,1,2,3}
 
-            labels = batch["option_id"].to(device, non_blocking=True)                     # [B]
+            if "option_id" in batch:
+                labels = batch["option_id"].to(device, non_blocking=True)                     # [B]
+            else:
+                labels = []
+                if "labels" in batch:
+                    lab = batch["labels"].to(device, non_blocking=True)                       # [B, T]
+                    for i in range(lab.size(0)):
+                        row = lab[i]
+                        idxs = (row != -100).nonzero(as_tuple=False).squeeze(-1)
+                        if idxs.numel() == 0:
+                            labels.append(-1)
+                            continue
+                        last_idx = idxs[-1].item()
+                        tok_id = int(row[last_idx].item())
+                        # map tok_id → {0,1,2,3}
+                        if tok_id in opt_ids.tolist():
+                            labels.append(opt_ids.tolist().index(tok_id))
+                        else:
+                            labels.append(-1)
+                    labels = torch.tensor(labels, device=device)
+                else:
+                    labels = torch.full((preds.size(0),), -1, device=device, dtype=torch.long)
 
-            all_preds.extend(preds.detach().cpu().numpy().tolist())
-            all_labels.extend(labels.detach().cpu().numpy().tolist())
+            valid_mask = labels != -1
+            if valid_mask.any():
+                all_preds.extend(preds[valid_mask].detach().cpu().numpy().tolist())
+                all_labels.extend(labels[valid_mask].detach().cpu().numpy().tolist())
 
     all_preds = np.array(all_preds)
     all_labels = np.array(all_labels)

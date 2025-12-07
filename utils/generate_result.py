@@ -19,27 +19,14 @@ JSON_PATTERN_ANSWER_CONF = re.compile(
     re.IGNORECASE | re.DOTALL
 )
 
-def _build_prompt_casuallm_no_confidence(text: str) -> str:
-    return (
-        "You are a multiple-choice classifier. "
-        + "Read the news and answer in a single character 'A', 'B', 'C' or 'D', no extra text.\n"
-        + "Answer Options:\nA. World\nB. Sports\nC. Business\nD. Sci/Tech\n\n"
-        + f"News: {text}/n"
-        + f"Answer: "
-    )
-
 def _build_prompt_casuallm(text: str) -> str:
     return (
-        PROMPT_HEADER_CASUALLM
+        f"Read the news and classify it into World, Sports, Business or Sci/Tech. No explanation.\n"
         + f"News: {text}/n"
         + f"JSON: "
     )
 
 def _unwrap_base_dataset(ds):
-    """
-    如果 dataloader.dataset 是 Subset，就一直往內 unwrap，
-    最後拿到真正的 base dataset（例如 AGNewsCausalLMOptionDataset）。
-    """
     base = ds
     while isinstance(base, Subset):
         base = base.dataset
@@ -51,7 +38,7 @@ def generate_unlabeled_casuallm_with_confidence(
     unlabeled_loader,
     output_path,
     max_source_length: int = 768,
-    max_new_tokens: int = 20,
+    max_new_tokens: int = 32,
     gen_batch_size: int = None,
     do_sample: bool = False,
     temperature: float = 1.0,
@@ -173,4 +160,111 @@ def generate_unlabeled_casuallm_with_confidence(
     
     fout.close()
     print(f"[Generative AL] Saved unlabeled predictions to: {output_path}")
+    return output_path
+
+def _build_prompt_general(text: str, args):
+    if args.dataset.upper() == "AGNEWS":
+        return (
+            f"{PROMPT_HEADER_CASUALLM}"
+            f"News: {text}\n"
+            "Output: "
+        )
+    elif args.dataset.upper() == "GSM8K":
+        return (
+            "You are a helpful math problem solver. "
+            "Read the following problem and solve it step by step. "
+            "Finish with the final numeric answer and your confidence level (1 to 100).\n"
+            f"Problem: {text}\n"
+            "Answer: "
+        )
+    else:
+        # generic fallback
+        return f"Input: {text}\nOutput: "
+
+
+def generate_unlabeled_general(
+    args,
+    models,
+    unlabeled_loader,
+    output_path,
+    max_source_length: int = 768,
+    max_new_tokens: int = 128,
+    do_sample: bool = False,
+    temperature: float = 1.0,
+    top_p: float = 1.0,
+):
+
+    model = models["backbone"]
+    tokenizer = models.get("tokenizer")
+    assert tokenizer is not None, "tokenizer missing"
+
+    model.eval()
+    device = model.get_input_embeddings().weight.device
+
+    # 需要 pad_token 時 fallback 至 eos_token
+    if tokenizer.pad_token is None and tokenizer.eos_token is not None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    # 從 dataset 取原始 text（AGNEWS = news text，GSM8K = question）
+    base_ds = _unwrap_base_dataset(unlabeled_loader.dataset)
+
+    # 可能名為 data_texts（AGNEWS），或 question（GSM8K），因此通用處理：
+    if hasattr(base_ds, "data_texts"):
+        source_list = base_ds.data_texts
+    elif hasattr(base_ds, "questions"):
+        source_list = base_ds.questions
+    else:
+        raise ValueError("Dataset must have either 'data_texts' or 'questions'.")
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    fout = open(output_path, "w", newline="", encoding="utf-8")
+    writer = csv.writer(fout)
+
+    writer.writerow(["index", "source_text", "raw_output", "prompt_preview"])
+
+    with torch.inference_mode():
+        for batch in tqdm(unlabeled_loader, desc="Generating", unit="batch"):
+
+            idx_tensor = batch["index"]
+            idx_list = idx_tensor.tolist() if torch.is_tensor(idx_tensor) else list(idx_tensor)
+
+            batch_texts = []
+            for idx in idx_list:
+                batch_texts.append(source_list[idx])
+
+            prompts = [_build_prompt_general(t, args) for t in batch_texts]
+
+            # tokenize
+            enc = tokenizer(
+                prompts,
+                padding=True,
+                return_tensors="pt",
+            )
+            input_ids = enc["input_ids"].to(device)
+            attention_mask = enc["attention_mask"].to(device)
+
+            outputs = model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=max_new_tokens,
+                do_sample=do_sample,
+                temperature=temperature,
+                top_p=top_p,
+                eos_token_id=tokenizer.eos_token_id,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+
+            gen_only = outputs[:, input_ids.size(1):]
+            gen_texts = tokenizer.batch_decode(gen_only, skip_special_tokens=True)
+
+            for idx_val, src, raw, prompt in zip(idx_list, batch_texts, gen_texts, prompts):
+                writer.writerow([
+                    idx_val,
+                    src,
+                    raw.strip().replace("\n", "\\n"),
+                    prompt.replace("\n", " "),
+                ])
+
+    fout.close()
+    print(f"[Generative AL] Saved generation results to: {output_path}")
     return output_path

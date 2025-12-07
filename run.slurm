@@ -26,6 +26,6 @@ export HUGGINGFACE_HUB_CACHE=~/mg61_scratch2/chunheng/huggingface/hub
 #cd ..
 #rm -rf submodlib
 
-python main.py --method Random --dataset AGNEWS --textset --model LlamaCausal --causal-lm \
-    --trial 1 --cycle 1 --n-initial 300 --n-query 1000 --n-class 4 --epochs 4 --workers 3 --batch-size 4 --test-batch-size 32 \
-    --optimizer AdamW --scheduler linear --lr 2e-5 --scheduler StepLR --step_size 9999 --gamma 0.5
+python main.py --method Random --dataset GSM8K --textset --model LlamaCausal --causal-lm --free-form \
+    --trial 1 --cycle 1 --n-initial 2300 --n-query 500 --epochs 4 --workers 3 --batch-size 4 --test-batch-size 32 \
+    --optimizer AdamW --scheduler linear --lr 2e-6 --scheduler StepLR --step_size 9999 --gamma 0.5

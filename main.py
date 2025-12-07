@@ -13,7 +13,7 @@ from torch.utils.data.sampler import SubsetRandomSampler
 
 # Utils
 from utils import *
-from utils.generate_result import generate_unlabeled_casuallm_with_confidence
+from utils.generate_result import generate_unlabeled_casuallm_with_confidence, generate_unlabeled_general
 from trainers import *
 
 # Custom
@@ -122,18 +122,19 @@ if __name__ == '__main__':
             dataloaders['unlabeled'] = unlabeled_loader
 
             # 輸出 CSV 路徑
-            out_dir = "outputs_instruction_tuned_conf"
+            out_dir = f"outputs/{args.model}-{args.dataset}-{args.trial}/{args.cycle}-{args.n_initial}-{args.n_query}-epoch{args.epochs}-lr{args.lr}"
             os.makedirs(out_dir, exist_ok=True)
             out_csv = os.path.join(
                 out_dir,
                 f"trial{trial+1}_cycle{cycle+1}_pre_gen_conf.csv"
             )
 
-            generate_unlabeled_casuallm_with_confidence(
+            generate_unlabeled_general(
                 args,
                 models,
                 dataloaders['unlabeled'],
-                out_csv
+                out_csv,
+                max_new_tokens=256,
             )
 
             torch.cuda.empty_cache()
@@ -180,16 +181,12 @@ if __name__ == '__main__':
                 f"trial{trial+1}_cycle{cycle+1}_unlabeled_gen_conf.csv"
             )
 
-            generate_unlabeled_casuallm_with_confidence(
+            generate_unlabeled_general(
                 args,
                 models,
                 dataloaders['unlabeled'],  # 直接沿用 dataloader，index 一致
                 out_csv,
-                max_source_length=getattr(args, "gen_max_source_len", 768),
-                max_new_tokens=getattr(args, "gen_max_new_tokens", 32),
-                do_sample=getattr(args, "gen_do_sample", False),
-                temperature=getattr(args, "gen_temperature", 1.0),
-                top_p=getattr(args, "gen_top_p", 1.0),
+                max_new_tokens=256,
             )
 
             torch.cuda.empty_cache()
@@ -210,11 +207,15 @@ if __name__ == '__main__':
             # get query data class
             if args.textset:
                 if args.causal_lm:
-                    Q_classes = [ train_dst[idx]['option_id'].item() for idx in Q_index ]
+                    if args.free_form:
+                        Q_classes = []
+                    else:
+                        Q_classes = [ train_dst[idx]['option_id'].item() for idx in Q_index ]
                 else:
                     Q_classes = [train_dst[idx]['labels'].item() for idx in Q_index]
             else:
                 Q_classes = [train_dst[idx][1] for idx in Q_index]
+
             class_counts = Counter(Q_classes)
 
             # Update Indices
