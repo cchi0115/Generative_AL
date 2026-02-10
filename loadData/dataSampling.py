@@ -77,7 +77,7 @@ def get_sub_train_dataset(args, dataset, L_index, O_index, U_index, Q_index=None
         If initial=True: A tuple of (L_index, O_index, U_index)
         If initial=False: A tuple of (L_index, O_index, U_index, num_in_query)
     """
-    if getattr(args, "dataset", "").upper() == "GSM8K":
+    if getattr(args, "dataset", "").upper() in ["GSM8K", "SQUAD"]:
         n_samples = len(dataset)
         all_indices = list(range(n_samples))
         budget = args.n_initial 
@@ -88,13 +88,13 @@ def get_sub_train_dataset(args, dataset, L_index, O_index, U_index, Q_index=None
             O_index = [] 
             U_index = list(set(all_indices) - set(L_index))
 
-            print(f"[GSM8K] Initial split -> Labeled: {len(L_index)}, Unlabeled: {len(U_index)}, OOD: {len(O_index)}")
+            print(f"[{args.dataset}] Initial split -> Labeled: {len(L_index)}, Unlabeled: {len(U_index)}, OOD: {len(O_index)}")
             return L_index, O_index, U_index
         else:
             Q_index = list(Q_index)
             L_index = list(L_index) + Q_index
             U_index = list(set(U_index) - set(Q_index))
-            print(f"[GSM8K] Update after query -> Labeled: {len(L_index)}, Unlabeled: {len(U_index)}, OOD: {len(O_index)}")
+            print(f"[{args.dataset}] Update after query -> Labeled: {len(L_index)}, Unlabeled: {len(U_index)}, OOD: {len(O_index)}")
             return L_index, O_index, U_index, len(Q_index)
 
     else:

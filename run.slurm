@@ -1,31 +1,38 @@
 #!/bin/bash
-#SBATCH --job-name=DAL_train
+#SBATCH --job-name=gsm8k-LL-PPL-exp
 #SBATCH --account=mg61
 #SBATCH --ntasks=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
 #SBATCH --gres=gpu:A100:1
-#SBATCH --partition=fit
-#SBATCH --qos=fitq
-#SBATCH --time=1-00:00:00
+#SBATCH --partition=gpu
+#SBATCH --qos=normal
+#SBATCH --constraint="A100-80G"
+#SBATCH --time=3-00:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=cchi0115@student.monash.edu
 #SBATCH --output=log/%j.out
 #SBATCH --error=log/%j.err
 
-source ~/mg61_scratch2/ch_env/DALBenchmark/bin/activate
+#source ~/mg61_scratch2/ch_env/DALBenchmark/bin/activate
+module load miniforge3
+conda activate DAL
 export HF_HOME=~/mg61_scratch2/chunheng/huggingface
 export HUGGINGFACE_HUB_CACHE=~/mg61_scratch2/chunheng/huggingface/hub
-#module load cuda/12.2.0
+module load cuda/12.2.0
+#nvidia-smi
 #pip install -r requirements.txt
-#pip install torchlars==0.1.2
+#pip install torchlars==0.1.2 --no-build-isolation
 #git clone https://github.com/decile-team/submodlib.git
 #cd submodlib
 #pip install .
 #cd ..
 #rm -rf submodlib
 
-python main.py --method Random --dataset GSM8K --textset --model LlamaCausal --causal-lm --free-form \
-    --trial 1 --cycle 1 --n-initial 2300 --n-query 500 --epochs 4 --workers 3 --batch-size 4 --test-batch-size 32 \
-    --optimizer AdamW --scheduler linear --lr 2e-6 --scheduler StepLR --step_size 9999 --gamma 0.5
+echo "job started!"
+
+python main.py --method Hybrid --hybrid-strategy diversity_prior --uncertainty Perplexity --diversity LLMLabel --consistent-k 10 --dataset GSM8K \
+    --textset --model Llama3 --causal-lm --free-form \
+    --trial 3 --cycle 15 --n-initial 100  --n-query 300 --epochs 4 --workers 0 --batch-size 2 --test-batch-size 16 \
+    --optimizer AdamW --scheduler StepLR --step_size 2 --gamma 0.5 --lr 1e-4

@@ -42,7 +42,7 @@ def train_model(args, trial, models, criterion, optimizers, schedulers, dataload
     writer = SummaryWriter(log_dir=log_dir)
 
     # Standard methods
-    if args.method in ['Random', 'Uncertainty', 'Coreset', 'BADGE', 'CCAL', 'SIMILAR', 
+    if args.method in ['Random', 'Uncertainty', 'Coreset', 'BADGE', 'CCAL', 'SIMILAR', 'Diversity', 'Hybrid',
                        'VAAL', 'WAAL', 'EPIG', 'EntropyCB', 'CoresetCB', 'AlphaMixSampling', 
                        'noise_stability', 'SAAL', 'VESSAL', 'corelog', 'coremse']:
         train(args, trial, models, criterion, optimizers, schedulers, dataloaders, writer)

@@ -1,0 +1,46 @@
+# --- PyTorch Core (硬體相關，建議鎖定) ---
+--index-url https://download.pytorch.org/whl/cu121
+--extra-index-url https://pypi.org/simple
+torch==2.2.2
+torchvision==0.17.2
+torchaudio==2.2.2
+
+# --- Hugging Face Ecosystem (您的主要變動來源) ---
+# 建議讓 transformers 與 datasets 保持您指定的版本，但其他讓 pip 決定
+transformers>=4.46.2
+datasets
+peft
+accelerate>=0.26.0
+huggingface-hub>=0.24.0
+# LightEval 建議直接抓 Github 最新版以避開 dummy package 與版本過舊問題
+lighteval>=0.8.0
+
+# --- Scientific & Data Stack (放寬版本限制) ---
+# Torch 2.x 通常需要 numpy < 2.0，這裡做個保護
+numpy<2.0
+pandas>=2.2.0
+scikit-learn
+scipy
+matplotlib
+seaborn
+jupyter
+ipykernel
+notebook
+
+# --- User Specific / Niche Libraries (您原本清單中看起來像特定用途的庫) ---
+# 移除了 == 版本號，讓 pip 自動尋找與上述套件相容的版本
+torchlars==0.1.2
+batchbald-redux
+blackhc.project
+finch-clust
+laaos
+nets
+pure-eval
+toma
+lightning-utilities
+tensorboard
+faiss-gpu
+gurobipy
+gensim
+nltk
+tiktoken

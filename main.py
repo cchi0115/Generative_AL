@@ -13,7 +13,8 @@ from torch.utils.data.sampler import SubsetRandomSampler
 
 # Utils
 from utils import *
-from utils.generate_result import generate_unlabeled_casuallm_with_confidence, generate_unlabeled_general
+#from utils.generate_result import generate_unlabeled_general
+from utils.lighteval_wrapper import evaluate_with_lighteval
 from trainers import *
 
 # Custom
@@ -116,31 +117,10 @@ if __name__ == '__main__':
             unlabeled_loader = DataLoader(
                 train_dst,
                 sampler=sampler_unlabeled,
-                batch_size=args.batch_size,   # 用 test_batch_size 做生成比較省事
+                batch_size=args.batch_size,
                 num_workers=args.workers
             )
             dataloaders['unlabeled'] = unlabeled_loader
-
-            # 輸出 CSV 路徑
-            out_dir = f"outputs/{args.model}-{args.dataset}-{args.trial}/{args.cycle}-{args.n_initial}-{args.n_query}-epoch{args.epochs}-lr{args.lr}"
-            os.makedirs(out_dir, exist_ok=True)
-            out_csv = os.path.join(
-                out_dir,
-                f"trial{trial+1}_cycle{cycle+1}_pre_gen_conf.csv"
-            )
-
-            generate_unlabeled_general(
-                args,
-                models,
-                dataloaders['unlabeled'],
-                out_csv,
-                max_new_tokens=256,
-            )
-
-            torch.cuda.empty_cache()
-            gc.collect()
-
-            acc, prec, recall, f1  = evaluate_model(args, models, dataloaders)
 
             # Training
             t = time.time()
@@ -154,92 +134,95 @@ if __name__ == '__main__':
                     trial + 1, args.trial, cycle + 1, args.cycle, len(I_index)), flush=True)
             acc, prec, recall, f1  = evaluate_model(args, models, dataloaders)
 
+            # sampler_unlabeled = SubsetRandomSampler(U_index)
+            # unlabeled_loader = DataLoader(
+            #     train_dst,
+            #     sampler=sampler_unlabeled,
+            #     batch_size=args.batch_size,  
+            #     num_workers=args.workers
+            # )
+            # dataloaders['unlabeled'] = unlabeled_loader
+
+            # out_csv = os.path.join(
+            #     out_dir,
+            #     f"trial{trial+1}_cycle{cycle+1}_unlabeled_gen_conf.csv"
+            # )
+
+            # generate_unlabeled_general(
+            #     args,
+            #     models,
+            #     dataloaders['unlabeled'],
+            #     out_csv,
+            #     max_new_tokens=256,
+            # )
+
+            # torch.cuda.empty_cache()
+            # gc.collect()
+
+            # print(f"[Cycle {cycle+1}] Saved unlabeled generative outputs to {out_csv}")
+
             #### AL Query ####
-            print("==========Start Querying==========")
-            selection_args = dict(I_index=I_index,
-                                  O_index=O_index,
-                                  selection_method=args.uncertainty,
-                                  dataloaders=dataloaders,
-                                  cur_cycle=cycle,
-                                  cluster_centers=cluster_centers,
-                                  cluster_labels=cluster_labels,
-                                  cluster_indices=cluster_indices)
-            ALmethod = methods.__dict__[args.method](args, models, unlabeled_dst, U_index, **selection_args)
-            
-            sampler_unlabeled = SubsetRandomSampler(U_index)
-            unlabeled_loader = DataLoader(
-                train_dst,
-                sampler=sampler_unlabeled,
-                batch_size=args.batch_size,   # 用 test_batch_size 做生成比較省事
-                num_workers=args.workers
-            )
-            dataloaders['unlabeled'] = unlabeled_loader
+            if cycle < args.cycle - 1:
+                print("==========Start Querying==========")
+                selection_args = dict(I_index=I_index,
+                                    O_index=O_index,
+                                    selection_method=args.uncertainty,
+                                    diversity_method=args.diversity,
+                                    hybrid_strategy=args.hybrid_strategy,
+                                    hybrid_beta=args.hybrid_beta,
+                                    dataloaders=dataloaders,
+                                    cur_cycle=cycle,
+                                    cluster_centers=cluster_centers,
+                                    cluster_labels=cluster_labels,
+                                    cluster_indices=cluster_indices)
+                ALmethod = methods.__dict__[args.method](args, models, unlabeled_dst, U_index, **selection_args)
+                
+                # Add timing statistics
+                select_start_time = time.time()
+                Q_index, Q_scores = ALmethod.select()
+                select_end_time = time.time()
+                select_duration = select_end_time - select_start_time
+                # Record time
+                trial_select_times.append(select_duration)
+                all_select_times.append(select_duration)
+                print(f"Trial {trial+1}, Cycle {cycle+1} - ALmethod.select() time: {select_duration:.4f}s")
 
-            # 輸出 CSV 路徑
-            out_csv = os.path.join(
-                out_dir,
-                f"trial{trial+1}_cycle{cycle+1}_unlabeled_gen_conf.csv"
-            )
-
-            generate_unlabeled_general(
-                args,
-                models,
-                dataloaders['unlabeled'],  # 直接沿用 dataloader，index 一致
-                out_csv,
-                max_new_tokens=256,
-            )
-
-            torch.cuda.empty_cache()
-            gc.collect()
-
-            print(f"[Cycle {cycle+1}] Saved unlabeled generative outputs to {out_csv}")
-
-            # Add timing statistics
-            select_start_time = time.time()
-            Q_index, Q_scores = ALmethod.select()
-            select_end_time = time.time()
-            select_duration = select_end_time - select_start_time
-            # Record time
-            trial_select_times.append(select_duration)
-            all_select_times.append(select_duration)
-            print(f"Trial {trial+1}, Cycle {cycle+1} - ALmethod.select() time: {select_duration:.4f}s")
-
-            # get query data class
-            if args.textset:
-                if args.causal_lm:
-                    if args.free_form:
-                        Q_classes = []
+                # get query data class
+                if args.textset:
+                    if args.causal_lm:
+                        if args.free_form:
+                            Q_classes = []
+                        else:
+                            Q_classes = [ train_dst[idx]['option_id'].item() for idx in Q_index ]
                     else:
-                        Q_classes = [ train_dst[idx]['option_id'].item() for idx in Q_index ]
+                        Q_classes = [train_dst[idx]['labels'].item() for idx in Q_index]
                 else:
-                    Q_classes = [train_dst[idx]['labels'].item() for idx in Q_index]
-            else:
-                Q_classes = [train_dst[idx][1] for idx in Q_index]
+                    Q_classes = [train_dst[idx][1] for idx in Q_index]
 
-            class_counts = Counter(Q_classes)
+                class_counts = Counter(Q_classes)
 
-            # Update Indices
-            I_index, O_index, U_index, in_cnt = get_sub_train_dataset(args, train_dst, I_index, O_index, U_index, Q_index, initial=False)
-            print("# Labeled_in: {}, # Labeled_ood: {}, # Unlabeled: {}".format(
-                len(set(I_index)), len(set(O_index)), len(set(U_index)))
-            )
+                # Update Indices
+                I_index, O_index, U_index, in_cnt = get_sub_train_dataset(args, train_dst, I_index, O_index, U_index, Q_index, initial=False)
+                print("# Labeled_in: {}, # Labeled_ood: {}, # Unlabeled: {}".format(
+                    len(set(I_index)), len(set(O_index)), len(set(U_index)))
+                )
 
-            # Meta-training MQNet
-            if args.method == 'MQNet':
-                models, optimizers, schedulers = init_mqnet(args, nets, models, optimizers, schedulers)
-                unlabeled_loader = DataLoader(unlabeled_dst, sampler=SubsetRandomSampler(U_index), batch_size=args.test_batch_size, num_workers=args.workers)
-                delta_loader = DataLoader(train_dst, sampler=SubsetRandomSampler(Q_index), batch_size=max(1, args.csi_batch_size), num_workers=args.workers)
-                models = meta_train(args, models, optimizers, schedulers, criterion, dataloaders['train'], unlabeled_loader, delta_loader)
+                # Meta-training MQNet
+                if args.method == 'MQNet':
+                    models, optimizers, schedulers = init_mqnet(args, nets, models, optimizers, schedulers)
+                    unlabeled_loader = DataLoader(unlabeled_dst, sampler=SubsetRandomSampler(U_index), batch_size=args.test_batch_size, num_workers=args.workers)
+                    delta_loader = DataLoader(train_dst, sampler=SubsetRandomSampler(Q_index), batch_size=max(1, args.csi_batch_size), num_workers=args.workers)
+                    models = meta_train(args, models, optimizers, schedulers, criterion, dataloaders['train'], unlabeled_loader, delta_loader)
 
-            # Update trainloader
-            sampler_labeled = SubsetRandomSampler(I_index)  # make indices initial to the samples
-            dataloaders['train'] = DataLoader(train_dst, sampler=sampler_labeled, batch_size=args.batch_size, num_workers=args.workers)
-            if args.method in ['LFOSA']:
-                query_Q = I_index + O_index
-                sampler_query = SubsetRandomSampler(query_Q)  # make indices initial to the samples
-                dataloaders['query'] = DataLoader(train_dst, sampler=sampler_query, batch_size=args.batch_size, num_workers=args.workers)
-                ood_query = SubsetRandomSampler(O_index)  # make indices initial to the samples
-                dataloaders['ood'] = DataLoader(train_dst, sampler=ood_query, batch_size=args.batch_size, num_workers=args.workers)
+                # Update trainloader
+                sampler_labeled = SubsetRandomSampler(I_index)  # make indices initial to the samples
+                dataloaders['train'] = DataLoader(train_dst, sampler=sampler_labeled, batch_size=args.batch_size, num_workers=args.workers)
+                if args.method in ['LFOSA']:
+                    query_Q = I_index + O_index
+                    sampler_query = SubsetRandomSampler(query_Q)  # make indices initial to the samples
+                    dataloaders['query'] = DataLoader(train_dst, sampler=sampler_query, batch_size=args.batch_size, num_workers=args.workers)
+                    ood_query = SubsetRandomSampler(O_index)  # make indices initial to the samples
+                    dataloaders['ood'] = DataLoader(train_dst, sampler=ood_query, batch_size=args.batch_size, num_workers=args.workers)
 
             # Log cycle information
             log_cycle_info(logs, cycle, acc, prec, recall, f1, in_cnt, class_counts, select_duration)

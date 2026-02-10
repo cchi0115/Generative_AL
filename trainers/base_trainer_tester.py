@@ -7,9 +7,10 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 from sklearn.metrics import f1_score, recall_score, precision_score, accuracy_score
 from sklearn.metrics import hamming_loss, jaccard_score
+from utils.CustomCollatorWithStrings import CustomCollatorWithStrings
 import torch.nn.functional as F
 import re
-
+import string
 
 def train(args, trial, models, criterion, optimizers, schedulers, dataloaders, writer=None):
     """
@@ -259,29 +260,6 @@ def train_epoch_nlp_casuallm(args, models, criterion, optimizers, dataloaders, w
     print(f"[Train causal LM] Epoch {epoch}: loss={avg_loss:.4f}, acc={avg_acc:.4f}")
     return avg_loss, avg_acc
 
-def _normalize_text(s: str) -> str:
-    s = s.strip()
-    s = re.sub(r"\s+", " ", s)
-    return s.lower()
-
-def _find_label(s, label_texts):
-    pos = []
-    for l in label_texts:
-        idx = s.find(l)
-        idx = idx if idx>=0 else len(label_texts)
-        pos.append(idx)
-    
-    return pos.index(min(pos))
-
-def _extract_final_answer_from_gsm8k(answer_text: str) -> str:
-    if "####" in answer_text:
-        final = answer_text.split("####")[-1].strip()
-        return final
-    elif "The final answer is:" in answer_text:
-        final = answer_text.aplit("The final answer is:")[-1].strip()
-        return final
-    return answer_text.strip()
-
 def _extract_last_number_from_text(text: str):
     text = text.replace(",", "")
     nums = re.findall(r"-?\d+\.?\d*", text)
@@ -291,6 +269,7 @@ def _extract_last_number_from_text(text: str):
 
 def _normalize_number_str(s: str) -> str:
     s = s.strip()
+    s = s.strip('.')
     s = s.replace(",", "")
     try:
         v = float(s)
@@ -300,6 +279,42 @@ def _normalize_number_str(s: str) -> str:
             return str(v)
     except Exception:
         return s
+
+def _normalize_text(s):
+    def remove_articles(text):
+        return re.sub(r'\b(a|an|the)\b', ' ', text)
+
+    def white_space_fix(text):
+        return ' '.join(text.split())
+
+    def remove_punc(text):
+        exclude = set(string.punctuation)
+        return ''.join(ch for ch in text if ch not in exclude)
+
+    def lower(text):
+        return text.lower()
+
+    return white_space_fix(remove_articles(remove_punc(lower(s))))
+
+def get_prompt(dataset, question, context = None):
+    if dataset == "GSM8K":
+        return (
+                    "You are a helpful math problem solver. "
+                    "Read the following problem and solve it step by step. "
+                    "Finish with the final numeric answer.\n"
+                    f"Problem: {question}\n"
+                    "Answer: "
+                )
+    elif dataset == "SQUAD":
+        return (
+            "Read the following text and answer the question. "
+            "If the answer is not in the text, reply with 'unanswerable'.\n\n"
+            f"Text: {context}\n\n"
+            f"Question: {question}\n\n"
+            "Answer: "
+        )
+    else:
+        raise ValueError(f"Unsupported dataset: {dataset}")
     
 
 def train_epoch_nlp_casuallm_1(args, models, criterion, optimizers, dataloaders, writer, epoch):
@@ -308,6 +323,14 @@ def train_epoch_nlp_casuallm_1(args, models, criterion, optimizers, dataloaders,
 
     device = model.get_input_embeddings().weight.device
     train_loader = dataloaders["train"]
+
+    tokenizer = models["tokenizer"]
+    tokenizer.padding_side = "right"
+
+    train_collator = CustomCollatorWithStrings(
+        tokenizer=tokenizer
+    )
+    train_loader.collate_fn = train_collator
 
     total_loss = 0.0
     total_samples = 0
@@ -339,118 +362,127 @@ def train_epoch_nlp_casuallm_1(args, models, criterion, optimizers, dataloaders,
     print(f"[Train causal LM] Epoch {epoch}: loss={avg_loss:.4f}")
     return avg_loss, 0
 
+def evaluate_casual_lm(args, model, tokenizer, dataloader, device, dataset_type, max_samples=None, desc="Evaluating"):
+    all_gold = []
+    all_pred = []
+    total_samples = 0
+    correct = 0
+    
+    tokenizer.padding_side = "left"
+    
+    with torch.no_grad():
+        for batch in tqdm(dataloader, desc=desc, leave=False):
+            if dataset_type == "GSM8K":
+                questions = batch["question"]
+                input_texts = [get_prompt("GSM8K", q) for q in questions]
+                max_new_tokens = 256
+            elif dataset_type == "SQUAD":
+                questions = batch["question"]
+                contexts = batch["context"]
+                input_texts = [get_prompt("SQUAD", q, c) for q, c in zip(questions, contexts)]
+                max_new_tokens = 16
+            else:
+                raise ValueError(f"Unsupported dataset: {dataset_type}")
+
+            inputs = tokenizer(
+                input_texts, 
+                padding=True, 
+                return_tensors="pt"
+            ).to(device)
+
+            target_final_answers = batch["target_final_answer"] # list of str
+
+            gen_ids = model.generate(
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs["attention_mask"],
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                eos_token_id=tokenizer.eos_token_id,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+
+            new_tokens = gen_ids[:, inputs["input_ids"].size(1):]
+            decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
+            #print(target_final_answers[0], decoded[0])
+
+            for gold_str, pred_text in zip(target_final_answers, decoded):
+                is_correct = False
+                
+                if dataset_type == "GSM8K":
+                    gold_norm = _normalize_number_str(gold_str)
+                    pred_raw = _extract_last_number_from_text(pred_text)
+                    pred_norm = _normalize_number_str(pred_raw) if pred_raw is not None else "NONE"
+                    
+                    if pred_norm == gold_norm:
+                        is_correct = True
+                    
+                    all_gold.append(gold_norm)
+                    all_pred.append(pred_norm)
+                    
+                elif dataset_type == "SQUAD":
+                    gold_norm = _normalize_text(gold_str)
+                    pred_norm = _normalize_text(pred_text)
+                    
+                    if pred_norm == gold_norm:
+                        is_correct = True
+                        
+                    all_gold.append(gold_norm)
+                    all_pred.append(pred_norm)
+
+                if is_correct:
+                    correct += 1
+                total_samples += 1
+
+            if max_samples and total_samples >= max_samples:
+                break
+
+    accuracy = correct / max(total_samples, 1)
+    return accuracy, total_samples, correct
 
 def test_nlp_casuallm_1(args, models, dataloaders):
     model = models["backbone"]
     tokenizer = models.get("tokenizer", None)
     assert tokenizer is not None
-
+    
     device = model.get_input_embeddings().weight.device
     model.eval()
 
     test_loader = dataloaders["test"]
+    train_loader = dataloaders["train"]
 
-    if args.dataset == "AGNEWS":
-        label_texts = ["World", "Sports", "Business", "Sci/Tech"]
-        norm_label_texts = [_normalize_text(t) for t in label_texts]
-        num_classes = len(label_texts)
+    eval_collator = CustomCollatorWithStrings(tokenizer=tokenizer)
+    train_loader.collate_fn = eval_collator
+    test_loader.collate_fn = eval_collator
 
-        all_preds = []
-        all_labels = []
+    if args.dataset in ["GSM8K", "SQUAD"]:
+        print(f"[{args.dataset}] Evaluating on Training Subset...")
+        train_acc, train_total, train_correct = evaluate_casual_lm(
+            args, model, tokenizer, train_loader, device, 
+            dataset_type=args.dataset, 
+            max_samples=1000,
+            desc=f"Train Eval ({args.dataset})"
+        )
+        print(f"{args.dataset} training set result:")
+        print(f"* Accuracy: {train_acc:.3f}")
+        print(f"* Total samples: {train_total}")
+        print(f"* Correct: {train_correct}")
 
-        with torch.no_grad():
-            for idx, batch in enumerate(test_loader):
-                input_ids = batch["input_ids"].to(device, non_blocking=True)
-                attention_mask = batch["attention_mask"].to(device, non_blocking=True)
-                option_id = batch["option_id"].to(device, non_blocking=True)  # gold class 0~3
+        # 2. Evaluate on Test Set (Full)
+        print(f"[{args.dataset}] Evaluating on Test Set...")
+        test_acc, test_total, test_correct = evaluate_casual_lm(
+            args, model, tokenizer, test_loader, device, 
+            dataset_type=args.dataset,
+            desc=f"Test Eval ({args.dataset})"
+        )
+        print(f"Causal-LM NLP Test Results ({args.dataset}):")
+        print(f"* Accuracy: {test_acc:.3f}")
+        print(f"* Total samples: {test_total}")
+        print(f"* Correct: {test_correct}")
 
-                gen_ids = model.generate(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    max_new_tokens=128,
-                    do_sample=False,
-                    eos_token_id=tokenizer.eos_token_id,
-                    pad_token_id=tokenizer.pad_token_id,
-                )
-
-                new_tokens = gen_ids[:, input_ids.size(1):]   # [B, L_new]
-                decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
-
-                for gold, text in zip(option_id, decoded):
-                    gold_label = int(gold.item())
-                    pred_norm = _normalize_text(text)
-                    pred_class = _find_label(pred_norm, norm_label_texts)
-                    if idx == 0:
-                        print("GOLD:", gold, "\ntext:", text)
-
-                    all_labels.append(gold_label)
-                    all_preds.append(pred_class)
-
-        all_labels = np.array(all_labels)
-        all_preds = np.array(all_preds)
-
-        accuracy = accuracy_score(all_labels, all_preds)
-        precision = precision_score(all_labels, all_preds, average="weighted", zero_division=0)
-        recall = recall_score(all_labels, all_preds, average="weighted", zero_division=0)
-        f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
-
-        print("Causal-LM NLP Test Results (AGNEWS, generate + exact label text):")
-        print(f"* Accuracy:  {accuracy:.3f}")
-        print(f"* Precision: {precision:.3f}")
-        print(f"* Recall:    {recall:.3f}")
-        print(f"* F1 Score:  {f1:.3f}")
-
-        return accuracy, precision, recall, f1
-
-    elif args.dataset == "GSM8K":
-        all_gold = []
-        all_pred = []
-        total_samples = 0
-        correct = 0
-
-        with torch.no_grad():
-            for batch in test_loader:
-                input_ids = batch["input_ids"].to(device, non_blocking=True)
-                attention_mask = batch["attention_mask"].to(device, non_blocking=True)
-
-                target_final_answer = batch["target_final_answer"]  # list of str
-
-                gen_ids = model.generate(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    max_new_tokens=128,
-                    do_sample=False,
-                    eos_token_id=tokenizer.eos_token_id,
-                    pad_token_id=tokenizer.pad_token_id,
-                )
-
-                new_tokens = gen_ids[:, input_ids.size(1):]
-                decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
-
-                for gold_str, pred_text in zip(target_final_answer, decoded):
-                    gold_num = _normalize_number_str(gold_str)
-                    pred_num_raw = _extract_last_number_from_text(pred_text)
-                    pred_num = _normalize_number_str(pred_num_raw) if pred_num_raw is not None else None
-
-                    all_gold.append(gold_num)
-                    all_pred.append(pred_num if pred_num is not None else "NONE")
-
-                    total_samples += 1
-                    if (pred_num is not None) and (pred_num == gold_num):
-                        correct += 1
-
-        accuracy = correct / max(total_samples, 1)
-
-        print("Causal-LM NLP Test Results (GSM8K, numeric answer exact match):")
-        print(f"* Accuracy: {accuracy:.3f}")
-        print(f"* Total samples: {total_samples}")
-        print(f"* Correct: {correct}")
-
-        return accuracy, None, None, None
+        return test_acc, None, None, None
 
     else:
         raise ValueError(f"Unsupported dataset: {args.dataset}")
-
 
 
 def test(args, models, dataloaders):

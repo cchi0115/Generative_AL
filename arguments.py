@@ -131,6 +131,13 @@ parser.add_argument('--method', default="Uncertainty", help="specifiy AL method 
 parser.add_argument('--submodular', default="logdetcmi", help="specifiy submodular function to use") #flcmi, logdetcmi
 parser.add_argument('--submodular_greedy', default="LazyGreedy", help="specifiy greedy algorithm for submodular optimization")
 parser.add_argument('--uncertainty', default="CONF", help="specifiy uncertanty score to use") #CONF, Margin, Entropy
+parser.add_argument('--diversity', default="semantic_embedding", help="specifiy diversity to use") #semantic_embedding, LLMLabel
+parser.add_argument('--hybrid-strategy', default="uncertainty_prior", help="specifiy diversity to use") #semantic_embedding, LLMLabel
+parser.add_argument('--hybrid-beta', default=5, help="specifiy diversity to use") #semantic_embedding, LLMLabel
+parser.add_argument('--two-step-verbal', action='store_true', help="two step verbal uncertainty generation")
+parser.add_argument('--consistent-k', default=3, type=int, help='self-consistent of K times')
+parser.add_argument('--diversity-embed-model', '-dem', default="sentence-transformers/all-MiniLM-L6-v2", help="embedding model for sementic clustering")
+parser.add_argument('--diversity-label-model', '-dlm', default="meta-llama/Llama-3.2-3B-Instruct", help="labeling model for sample tags")
 # for CCAL
 parser.add_argument("--resize_factor", help='resize scale is sampled from [resize_factor, 1.0]',default=0.08, type=float)
 parser.add_argument("--resize_fix", help='resize scale is fixed to resize_factor (not (resize_factor, 1.0])',action='store_true')

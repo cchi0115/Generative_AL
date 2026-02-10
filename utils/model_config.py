@@ -48,7 +48,7 @@ def get_models(args, nets, model, models=None):
             return m
 
     # --------------------- Text Dataset Branch ---------------------
-    if args.model in ['DistilBert', 'Roberta', 'Llama', 'LlamaCausal']:
+    if args.model in ['DistilBert', 'Roberta', 'Llama2', 'Llama3']:
         def load_text_model(num_labels):
             # Load the corresponding text model with the specified number of labels.
             if args.model == 'DistilBert':
@@ -56,40 +56,18 @@ def get_models(args, nets, model, models=None):
                     'distilbert-base-uncased', num_labels=int(num_labels), output_hidden_states=True)
             elif args.model == 'Roberta':
                 return RobertaForSequenceClassification.from_pretrained(
-                    'roberta-base', num_labels=int(num_labels), output_hidden_states=True)
-            elif args.model == 'Llama':
-                config = AutoConfig.from_pretrained('meta-llama/Llama-2-7b-chat-hf', num_labels=int(num_labels), output_hidden_states=True)
-                model = AutoModelForSequenceClassification.from_pretrained('meta-llama/Llama-2-7b-chat-hf', 
-                                config=config, device_map="auto")
-                if model.config.pad_token_id is None:
-                    model.config.pad_token_id = model.config.eos_token_id
-
-                lora_cfg = LoraConfig(
-                    r=16,
-                    lora_alpha=32,
-                    lora_dropout=0.05,
-                    bias="none",
-                    task_type="SEQ_CLS",
-                    target_modules=["q_proj", "v_proj"],
-                )
-
-                lora_model = get_peft_model(model, lora_cfg)
-                lora_model.print_trainable_parameters()
-                return lora_model
-            
-            elif args.model == 'LlamaCausal':
-                cfg = AutoConfig.from_pretrained('meta-llama/Llama-2-7b-chat-hf', use_auth_token=True)
+                    'roberta-base', num_labels=int(num_labels), output_hidden_states=True)            
+            elif args.model == 'Llama2':
+                cfg = AutoConfig.from_pretrained('meta-llama/Llama-2-7b-hf', use_auth_token=True)
                 backbone = AutoModelForCausalLM.from_pretrained(
-                    'meta-llama/Llama-2-7b-chat-hf',
+                    'meta-llama/Llama-2-7b-hf',
                     config=cfg,
                     device_map="auto"
                 )
 
-                tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-chat-hf', use_auth_token=True)
+                tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-hf', use_auth_token=True)
                 if tokenizer.pad_token is None:
                     tokenizer.pad_token = tokenizer.eos_token
-
-                tokenizer.padding_side = "left"
 
                 lora_cfg = LoraConfig(
                     r=16,
@@ -97,7 +75,33 @@ def get_models(args, nets, model, models=None):
                     lora_dropout=0.05,
                     bias="none",
                     task_type="CAUSAL_LM",
-                    target_modules=["q_proj", "v_proj"],
+                    target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+                )
+                model = get_peft_model(backbone, lora_cfg)
+                model.print_trainable_parameters()
+
+                return model, tokenizer
+
+            elif args.model == 'Llama3':
+                cfg = AutoConfig.from_pretrained('meta-llama/Llama-3.2-1B', use_auth_token=True)
+                backbone = AutoModelForCausalLM.from_pretrained(
+                    'meta-llama/Llama-3.2-1B',
+                    config=cfg,
+                    device_map="auto"
+                )
+
+                tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-3.2-1B', use_auth_token=True)
+                if tokenizer.pad_token is None:
+                    tokenizer.add_special_tokens({"pad_token": "[PAD]"})
+                    backbone.resize_token_embeddings(len(tokenizer))
+
+                lora_cfg = LoraConfig(
+                    r=16,
+                    lora_alpha=32,
+                    lora_dropout=0.05,
+                    bias="none",
+                    task_type="CAUSAL_LM",
+                    target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
                 )
                 model = get_peft_model(backbone, lora_cfg)
                 model.print_trainable_parameters()

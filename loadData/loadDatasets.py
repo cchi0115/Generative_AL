@@ -12,7 +12,8 @@ from ownDatasets.cifar100 import MyCIFAR100
 from ownDatasets.mnist import MyMNIST
 from ownDatasets.svhn import MySVHN
 from ownDatasets.agnews import MyAGNewsDataset, AGNewsCausalLMOptionDataset, AGNewsCausalLMLabelDataset
-from ownDatasets.gsm8k import GSM8KCausalLMDataset
+from ownDatasets.gsm8k_refine import GSM8KCausalLMDataset
+from ownDatasets.squad import SQuADV2CausalLMDataset
 from ownDatasets.imdb import MyIMDBDataset
 from ownDatasets.sst5 import MySST5Dataset
 from ownDatasets.dbpedia import MyDbpediaDataset
@@ -102,10 +103,14 @@ def get_dataset(args, trial):
             tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
         elif args.model == 'Roberta':
             tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
-        elif args.model == 'Llama' or args.model == 'LlamaCausal':
+        elif args.model == 'Llama2':
             tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-hf')
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token
+        elif args.model == 'Llama3':
+            tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-3.2-1B')
+            if tokenizer.pad_token is None:
+                tokenizer.add_special_tokens({"pad_token": "[PAD]"})
         
         if args.dataset == 'SST5':
             sst5_dataset = load_dataset('SetFit/sst5')
@@ -129,11 +134,7 @@ def get_dataset(args, trial):
             unlabeled_set = MyDbpediaDataset(dbpedia_dataset['train'],tokenizer=tokenizer, imbalance_factor=args.imb_factor)
         elif args.dataset == 'AGNEWS':
             agnews_dataset = load_dataset('ag_news')
-            if args.model == 'Llama':
-                train_set = MyAGNewsDataset(agnews_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
-                test_set = MyAGNewsDataset(agnews_dataset['test'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
-                unlabeled_set = MyAGNewsDataset(agnews_dataset['train'], tokenizer=tokenizer, imbalance_factor=args.imb_factor)
-            elif args.model == 'LlamaCausal':
+            if args.model == 'Llama2' or args.model == 'Llama3':
                 train_set = AGNewsCausalLMLabelDataset(agnews_dataset['train'].select(range(15000)), tokenizer=tokenizer, imbalance_factor=args.imb_factor)
                 test_set = AGNewsCausalLMLabelDataset(agnews_dataset['test'].select(range(1000)), tokenizer=tokenizer, imbalance_factor=args.imb_factor)
                 unlabeled_set = AGNewsCausalLMLabelDataset(agnews_dataset['train'].select(range(15000)), tokenizer=tokenizer, imbalance_factor=args.imb_factor)
@@ -147,6 +148,11 @@ def get_dataset(args, trial):
             train_set = GSM8KCausalLMDataset(gsm8k_dataset['train'], tokenizer=tokenizer)
             test_set = GSM8KCausalLMDataset(gsm8k_dataset['test'], tokenizer=tokenizer)
             unlabeled_set = GSM8KCausalLMDataset(gsm8k_dataset['train'], tokenizer=tokenizer)
+        elif args.dataset == "SQUAD":
+            squad_dataset = load_dataset("rajpurkar/squad_v2")
+            train_set = SQuADV2CausalLMDataset(squad_dataset['train'], tokenizer=tokenizer)
+            test_set = SQuADV2CausalLMDataset(squad_dataset['validation'].select(range(2000)), tokenizer=tokenizer)
+            unlabeled_set = SQuADV2CausalLMDataset(squad_dataset['train'], tokenizer=tokenizer)
 
         else:
             raise ValueError(f"Text dataset '{args.dataset}' is not supported. Please choose from the available text datasets.")

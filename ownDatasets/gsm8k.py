@@ -37,6 +37,7 @@ class GSM8KCausalLMDataset(Dataset):
     def __getitem__(self, idx):
         question = self.questions[idx]
         full_answer = self.answers[idx].replace("####", "The final answer is:")
+        # full_answer = self.answers[idx]
 
         if self.use_cot:
             answer_text = full_answer.strip()
@@ -50,14 +51,14 @@ class GSM8KCausalLMDataset(Dataset):
                 "Read the following problem and solve it step by step. "
                 "Finish with the final numeric answer.\n"
                 f"Problem: {question}\n"
-                "Answer: "
+                #"Answer: "
             )
         else:
             prompt = (
                 "Read the following math word problem and answer with only the final numeric result. "
                 "No explanation.\n"
                 f"Problem: {question}\n"
-                "Answer: "
+                #"Answer: "
             )
 
         prompt_ids = self.tokenizer(

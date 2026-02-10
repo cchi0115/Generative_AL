@@ -18,3 +18,5 @@ from .saal import *
 
 from .bemps_corelog import *
 from .bemps_coremse import *
+from .diversity import *
+from .hybrid import *

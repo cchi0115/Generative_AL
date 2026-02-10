@@ -14,6 +14,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 import torch.nn.functional as F
+from utils.generate_result import generate_and_get_probabilities, get_consistent_score, get_perplexity_score
 
 class Uncertainty(ALMethod):
     def __init__(self, args, models, unlabeled_dst, U_index, selection_method="CONF", **kwargs):
@@ -22,7 +23,7 @@ class Uncertainty(ALMethod):
         selection_choices = [
             "CONF", "Entropy", "Margin", 
             "MeanSTD", "BALD", "VarRatio", 
-            "MarginDropout", "CONFDropout", "EntropyDropout"
+            "MarginDropout", "CONFDropout", "EntropyDropout", "Verbal", "Self-Consistent", "Perplexity"
         ]
         if selection_method not in selection_choices:
             raise NotImplementedError(f"Selection algorithm '{selection_method}' unavailable.")
@@ -66,10 +67,6 @@ class Uncertainty(ALMethod):
 
         # For non-MC Dropout methods, a single forward pass is sufficient
         print("| Calculating uncertainty of Unlabeled set...")
-
-        if self.args.causal_lm: 
-            assert self.tokenizer is not None, "tokenizer is required for causal LM uncertainty."
-            return self._rank_uncertainty_causal_lm_abcd_entropy(model, selection_loader)
 
         if self.selection_method in ["CONF", "Entropy", "Margin", "VarRatio"]:
             # In single forward-pass mode, keep the model in eval()
@@ -187,6 +184,27 @@ class Uncertainty(ALMethod):
                 # that higher entropy is ranked first.
                 scores = np.append(scores, -ent.cpu().numpy())
 
+        if self.selection_method == 'Verbal':
+            scores = generate_and_get_probabilities(
+                self.args,
+                self.models,
+                selection_loader
+            )
+
+        if self.selection_method == 'Self-Consistent':
+            scores = get_consistent_score(
+                self.args,
+                self.models,
+                selection_loader
+            )
+
+        if self.selection_method == 'Perplexity':
+            scores = get_perplexity_score(
+                self.args,
+                self.models,
+                selection_loader
+            )
+        
         return scores
 
     def select(self, **kwargs):
