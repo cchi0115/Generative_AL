@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=gsm8k-LL-PPL-exp
+#SBATCH --job-name=gsm8k-SC-SE-exp
 #SBATCH --account=mg61
 #SBATCH --ntasks=1
 #SBATCH --ntasks-per-node=1
@@ -30,9 +30,7 @@ module load cuda/12.2.0
 #cd ..
 #rm -rf submodlib
 
-echo "job started!"
-
-python main.py --method Hybrid --hybrid-strategy diversity_prior --uncertainty Perplexity --diversity LLMLabel --consistent-k 10 --dataset GSM8K \
+python main.py --method Hybrid --hybrid-strategy uncertainty_prior --uncertainty Self-Consistent --diversity semantic_embedding --consistent-k 10 --dataset GSM8K \
     --textset --model Llama3 --causal-lm --free-form \
-    --trial 3 --cycle 15 --n-initial 100  --n-query 300 --epochs 4 --workers 0 --batch-size 2 --test-batch-size 16 \
+    --trial 3 --cycle 15 --n-initial 100  --n-query 150 --epochs 4 --workers 2 --batch-size 8 --test-batch-size 16 \
     --optimizer AdamW --scheduler StepLR --step_size 2 --gamma 0.5 --lr 1e-4

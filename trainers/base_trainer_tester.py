@@ -335,8 +335,12 @@ def train_epoch_nlp_casuallm_1(args, models, criterion, optimizers, dataloaders,
     total_loss = 0.0
     total_samples = 0
 
+#    max_steps = getattr(args, "steps_per_epoch", None)
 
     for i, batch in enumerate(train_loader):
+#        if max_steps is not None and i >= max_steps:
+#            break
+
         input_ids = batch["input_ids"].to(device, non_blocking=True)
         attention_mask = batch["attention_mask"].to(device, non_blocking=True)
         labels = batch["labels"].to(device, non_blocking=True)
@@ -422,7 +426,8 @@ def evaluate_casual_lm(args, model, tokenizer, dataloader, device, dataset_type,
                 elif dataset_type == "SQUAD":
                     gold_norm = _normalize_text(gold_str)
                     pred_norm = _normalize_text(pred_text)
-                    
+                    pred_norm = pred_norm[:len(gold_norm)] if len(gold_norm) < len(pred_norm) else pred_norm
+
                     if pred_norm == gold_norm:
                         is_correct = True
                         

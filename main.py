@@ -24,6 +24,7 @@ import nets
 import methods as methods
 from collections import Counter
 from logger import initialize_log, log_cycle_info, save_logs, log_trial_timing_summary
+from utils.selection_log import output_selection
 
 # Main
 if __name__ == '__main__':
@@ -112,15 +113,6 @@ if __name__ == '__main__':
                 models = self_sup_train(args, trial, models, optimizers, schedulers, train_dst, I_index, O_index, U_index)
 
             cluster_centers, cluster_labels, cluster_indices = [], [], []
-
-            sampler_unlabeled = SubsetRandomSampler(U_index)
-            unlabeled_loader = DataLoader(
-                train_dst,
-                sampler=sampler_unlabeled,
-                batch_size=args.batch_size,
-                num_workers=args.workers
-            )
-            dataloaders['unlabeled'] = unlabeled_loader
 
             # Training
             t = time.time()
@@ -225,7 +217,8 @@ if __name__ == '__main__':
                     dataloaders['ood'] = DataLoader(train_dst, sampler=ood_query, batch_size=args.batch_size, num_workers=args.workers)
 
             # Log cycle information
-            log_cycle_info(logs, cycle, acc, prec, recall, f1, in_cnt, class_counts, select_duration)
+            output_selection(args, trial, cycle, I_index)
+            # log_cycle_info(logs, cycle, acc, prec, recall, f1, in_cnt, class_counts, select_duration)
 
             del models, optimizers, schedulers
             gc.collect()

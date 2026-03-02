@@ -151,7 +151,7 @@ def get_dataset(args, trial):
         elif args.dataset == "SQUAD":
             squad_dataset = load_dataset("rajpurkar/squad_v2")
             train_set = SQuADV2CausalLMDataset(squad_dataset['train'], tokenizer=tokenizer)
-            test_set = SQuADV2CausalLMDataset(squad_dataset['validation'].select(range(2000)), tokenizer=tokenizer)
+            test_set = SQuADV2CausalLMDataset(squad_dataset['validation'].select(range(10000)), tokenizer=tokenizer)
             unlabeled_set = SQuADV2CausalLMDataset(squad_dataset['train'], tokenizer=tokenizer)
 
         else:
